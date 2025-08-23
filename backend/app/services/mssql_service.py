@@ -25,7 +25,7 @@ class MSSQLService:
                 elif key in ['database', 'initial catalog']:
                     params['database'] = value
                 elif key in ['user id', 'uid', 'user']:
-                    params['user'] = value
+                    params['user'] = value  # pymssql uses 'user' parameter
                 elif key in ['password', 'pwd']:
                     params['password'] = value
                 elif key == 'trusted_connection' and value.lower() in ['true', 'yes']:

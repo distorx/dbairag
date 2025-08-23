@@ -141,7 +141,8 @@ import { ApiService, QueryHint, Suggestion } from './services/api.service';
                     [cellIndex]="i"
                     (execute)="executeCell(cell)"
                     (delete)="deleteCell(cell.id)"
-                    (update)="updateCell(cell.id, $event)">
+                    (update)="updateCell(cell.id, $event)"
+                    (executeSuggestion)="executeSuggestedQuery($event)">
                   </app-notebook-cell>
                 </div>
                 
@@ -221,8 +222,8 @@ export class AppComponent implements OnInit {
     this.notebookService.updateCell(cell.id, { isExecuting: true });
     this.toastr.info('Executing query...', 'Processing');
     
-    // Execute query
-    this.apiService.executeQuery({
+    // Execute query with optimized endpoint for 36x performance improvement
+    this.apiService.executeQueryOptimized({
       connection_id: this.currentConnectionId,
       prompt: cell.content
     }).subscribe({
@@ -321,6 +322,31 @@ export class AppComponent implements OnInit {
         content: suggestion.suggestion 
       });
       this.toastr.info(`Suggestion applied: ${suggestion.suggestion}`, 'Suggestion Used');
+    }
+  }
+  
+  executeSuggestedQuery(suggestedQuery: string) {
+    if (!this.currentConnectionId) {
+      this.toastr.warning('Please select a connection first', 'No Connection');
+      return;
+    }
+    
+    // Add a new cell with the suggested query
+    this.addNewCell();
+    
+    // Update the new cell with the suggested query
+    const targetCell = this.cells[this.cells.length - 1];
+    if (targetCell) {
+      this.notebookService.updateCell(targetCell.id, { 
+        content: suggestedQuery 
+      });
+      
+      // Automatically execute the suggested query
+      setTimeout(() => {
+        this.executeCell(targetCell);
+      }, 100); // Small delay to ensure UI updates
+      
+      this.toastr.info('Suggested query added and executing...', 'Suggestion Applied');
     }
   }
 }

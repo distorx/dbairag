@@ -25,16 +25,22 @@ import { ToastrService } from 'ngx-toastr';
             (blur)="onBlur()"
             (keydown)="onKeyDown($event)"
             placeholder="Search hints... (e.g., 'filter', 'join', 'group by')"
-            class="w-full px-3 py-2 pl-10 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+            class="w-full px-3 py-2 pl-10 pr-16 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
           
-          <!-- Search Icon -->
-          <svg class="absolute left-3 top-2.5 w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
-          </svg>
+          <!-- Search Icon / Loading Spinner -->
+          <div class="absolute left-3 top-2.5">
+            <svg *ngIf="!isSearching" class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+            </svg>
+            <svg *ngIf="isSearching" class="animate-spin w-5 h-5 text-blue-500" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+              <path class="opacity-75" fill="currentColor" d="m4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+          </div>
           
           <!-- Clear Button -->
           <button
-            *ngIf="searchQuery"
+            *ngIf="searchQuery && !isSearching"
             (click)="clearSearch()"
             class="absolute right-2 top-2.5 text-gray-400 hover:text-gray-600">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -173,8 +179,10 @@ export class HintsSearchComponent implements OnInit {
   suggestions: Suggestion[] = [];
   showResults = false;
   selectedIndex = -1;
+  isSearching = false;
   
   private searchSubject = new Subject<string>();
+  private filterSubject = new Subject<string>();
   
   constructor(
     private apiService: ApiService,
@@ -185,21 +193,41 @@ export class HintsSearchComponent implements OnInit {
     this.loadCategories();
     this.loadHints();
     
-    // Setup debounced search
+    // Setup debounced search for API suggestions
     this.searchSubject.pipe(
       debounceTime(300),
       distinctUntilChanged(),
       switchMap(query => {
         if (query.length < 2) {
           this.suggestions = [];
-          this.filterHints();
+          this.isSearching = false;
           return [];
         }
+        this.isSearching = true;
         return this.apiService.getSuggestions(query, 5);
       })
-    ).subscribe(suggestions => {
-      this.suggestions = suggestions;
-      this.showResults = true;
+    ).subscribe({
+      next: (suggestions) => {
+        this.suggestions = suggestions;
+        this.isSearching = false;
+        this.showResults = true;
+      },
+      error: (err) => {
+        console.error('Search suggestions error:', err);
+        this.isSearching = false;
+        this.suggestions = [];
+        // Still show results with local hints
+        this.showResults = true;
+      }
+    });
+
+    // Setup debounced local filtering for better performance
+    this.filterSubject.pipe(
+      debounceTime(150), // Faster debounce for local filtering
+      distinctUntilChanged()
+    ).subscribe(query => {
+      this.filterHints();
+      this.showResults = query.length > 0 || this.selectedCategory !== null;
     });
   }
   
@@ -228,8 +256,8 @@ export class HintsSearchComponent implements OnInit {
   
   onSearchChange(query: string) {
     this.searchQuery = query;
-    this.searchSubject.next(query);
-    this.filterHints();
+    this.searchSubject.next(query); // For API suggestions
+    this.filterSubject.next(query); // For local filtering with debounce
     this.selectedIndex = -1;
   }
   
@@ -254,18 +282,17 @@ export class HintsSearchComponent implements OnInit {
     
     // Sort by popularity
     this.filteredHints = hints.sort((a, b) => b.popularity - a.popularity);
-    this.showResults = this.searchQuery.length > 0 || this.selectedCategory !== null;
   }
   
   filterByCategory(category: string | null) {
     this.selectedCategory = category;
-    this.filterHints();
+    this.filterSubject.next(this.searchQuery); // Trigger debounced filtering
   }
   
   clearSearch() {
     this.searchQuery = '';
     this.suggestions = [];
-    this.filterHints();
+    this.filterSubject.next(''); // Trigger debounced filtering
     this.selectedIndex = -1;
   }
   

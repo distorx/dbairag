@@ -3,11 +3,13 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional
 from pydantic import BaseModel
+import logging
 from ..database import get_db
 from ..services.hint_service import hint_service
 from ..services.redis_service import redis_service
 
 router = APIRouter(prefix="/api/hints", tags=["hints"])
+logger = logging.getLogger(__name__)
 
 # Initialize Redis service for hint service
 hint_service.set_redis_service(redis_service)
@@ -172,11 +174,13 @@ async def invalidate_cache():
     
     hints_deleted = await hint_service.invalidate_hints_cache()
     patterns_deleted = await hint_service.invalidate_patterns_cache()
+    categories_deleted = await hint_service.invalidate_categories_cache()
     
     return {
         "message": "Cache invalidated",
         "hints_deleted": hints_deleted,
-        "patterns_deleted": patterns_deleted
+        "patterns_deleted": patterns_deleted,
+        "categories_deleted": categories_deleted
     }
 
 @router.post("/cache/warm")
@@ -208,6 +212,16 @@ async def get_categories(
     db: AsyncSession = Depends(get_db)
 ):
     """Get all available hint categories"""
+    cache_key = "hint_categories"
+    
+    # Check Redis cache first
+    if redis_service.is_connected:
+        cached_categories = await redis_service.get(cache_key, prefix="hints")
+        if cached_categories:
+            logger.info("Categories loaded from Redis cache")
+            return cached_categories
+    
+    # Query database if not in cache
     from sqlalchemy import select, distinct
     from ..models import QueryHint
     
@@ -217,6 +231,16 @@ async def get_categories(
         .order_by(QueryHint.category)
     )
     categories = result.scalars().all()
+    
+    # Cache in Redis
+    if redis_service.is_connected:
+        await redis_service.set(
+            cache_key,
+            categories,
+            prefix="hints",
+            ttl=86400  # 24 hours
+        )
+        logger.info("Categories cached in Redis")
     
     return categories
 

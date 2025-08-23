@@ -102,8 +102,9 @@ class HintService:
         await db.commit()
         await db.refresh(hint)
         
-        # Invalidate cache
+        # Invalidate caches
         await self.invalidate_hints_cache()
+        await self.invalidate_categories_cache()
         
         return hint
     
@@ -133,8 +134,9 @@ class HintService:
         await db.commit()
         await db.refresh(hint)
         
-        # Invalidate cache
+        # Invalidate caches
         await self.invalidate_hints_cache()
+        await self.invalidate_categories_cache()
         
         return hint
     
@@ -383,6 +385,15 @@ class HintService:
             return deleted
         return 0
     
+    async def invalidate_categories_cache(self):
+        """Invalidate categories cache in Redis"""
+        
+        if self.redis_service and self.redis_service.is_connected:
+            deleted = await self.redis_service.delete("hint_categories", prefix="hints")
+            logger.info(f"Invalidated categories cache entry")
+            return 1 if deleted else 0
+        return 0
+    
     async def get_suggestions(
         self,
         db: AsyncSession,
@@ -527,8 +538,9 @@ class HintService:
         await db.commit()
         logger.info(f"Initialized {len(default_hints)} default hints")
         
-        # Invalidate cache
+        # Invalidate caches
         await self.invalidate_hints_cache()
+        await self.invalidate_categories_cache()
 
 # Global instance
 hint_service = HintService()

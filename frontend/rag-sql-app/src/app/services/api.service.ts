@@ -114,6 +114,10 @@ export class ApiService {
     return this.http.post<QueryResponse>(`${this.apiUrl}/queries/execute`, request);
   }
 
+  executeQueryOptimized(request: QueryRequest): Observable<QueryResponse> {
+    return this.http.post<QueryResponse>(`${this.apiUrl}/queries/execute-optimized`, request);
+  }
+
   getQueryHistory(connectionId: number): Observable<any[]> {
     return this.http.get<any[]>(`${this.apiUrl}/queries/history/${connectionId}`);
   }
@@ -209,5 +213,15 @@ export class ApiService {
 
   refreshDocumentation(connectionId: number): Observable<any> {
     return this.http.post<any>(`${this.apiUrl}/queries/documentation/${connectionId}/refresh`, {});
+  }
+  
+  // Field analysis endpoint
+  getFieldAnalysis(connectionId: number): Observable<any> {
+    return this.http.get<any>(`${this.apiUrl}/queries/field-analysis/${connectionId}`);
+  }
+
+  // Test field analysis endpoint with mock data
+  getFieldAnalysisTest(connectionId: number): Observable<any> {
+    return this.http.get<any>(`${this.apiUrl}/queries/field-analysis/${connectionId}/test`);
   }
 }
