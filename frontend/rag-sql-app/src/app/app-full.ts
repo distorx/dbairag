@@ -7,6 +7,7 @@ import { EnumManagerComponent } from './components/enum-manager/enum-manager.com
 import { CacheStatsComponent } from './components/cache-stats/cache-stats.component';
 import { HintsSearchComponent } from './components/hints-search/hints-search.component';
 import { DocumentationViewerComponent } from './components/documentation-viewer/documentation-viewer.component';
+import { FieldAnalysisComponent } from './components/field-analysis/field-analysis.component';
 import { NotebookService, Cell } from './services/notebook.service';
 import { ApiService, QueryHint, Suggestion } from './services/api.service';
 
@@ -20,7 +21,8 @@ import { ApiService, QueryHint, Suggestion } from './services/api.service';
     EnumManagerComponent,
     CacheStatsComponent,
     HintsSearchComponent,
-    DocumentationViewerComponent
+    DocumentationViewerComponent,
+    FieldAnalysisComponent
   ],
   template: `
     <div class="min-h-screen bg-gray-100 flex flex-col">
@@ -96,6 +98,20 @@ import { ApiService, QueryHint, Suggestion } from './services/api.service';
                   class="whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm">
                   Database Documentation
                 </button>
+                <button
+                  (click)="activeTab = 'field-analysis'"
+                  [disabled]="!currentConnectionId"
+                  [class.border-blue-500]="activeTab === 'field-analysis'"
+                  [class.text-blue-600]="activeTab === 'field-analysis'"
+                  [class.border-transparent]="activeTab !== 'field-analysis'"
+                  [class.text-gray-500]="activeTab !== 'field-analysis'"
+                  [class.hover:text-gray-700]="activeTab !== 'field-analysis'"
+                  [class.hover:border-gray-300]="activeTab !== 'field-analysis'"
+                  [class.opacity-50]="!currentConnectionId"
+                  [class.cursor-not-allowed]="!currentConnectionId"
+                  class="whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm">
+                  Field Analysis
+                </button>
               </nav>
             </div>
 
@@ -141,7 +157,8 @@ import { ApiService, QueryHint, Suggestion } from './services/api.service';
                     [cellIndex]="i"
                     (execute)="executeCell(cell)"
                     (delete)="deleteCell(cell.id)"
-                    (update)="updateCell(cell.id, $event)">
+                    (update)="updateCell(cell.id, $event)"
+                    (executeSuggestion)="executeSuggestedQuery($event)">
                   </app-notebook-cell>
                 </div>
                 
@@ -164,6 +181,18 @@ import { ApiService, QueryHint, Suggestion } from './services/api.service';
                   Please select a database connection to view documentation
                 </div>
               </div>
+              
+              <!-- Field Analysis Tab -->
+              <div *ngIf="activeTab === 'field-analysis'">
+                <app-field-analysis
+                  *ngIf="currentConnectionId"
+                  [connectionId]="currentConnectionId">
+                </app-field-analysis>
+                
+                <div *ngIf="!currentConnectionId" class="text-center py-8 text-gray-500">
+                  Please select a database connection to view field analysis
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -176,7 +205,7 @@ export class AppComponent implements OnInit {
   title = 'rag-sql-app';
   currentConnectionId: number | null = null;
   cells: Cell[] = [];
-  activeTab: 'notebook' | 'documentation' = 'notebook';
+  activeTab: 'notebook' | 'documentation' | 'field-analysis' = 'notebook';
   
   constructor(
     private notebookService: NotebookService,
@@ -321,6 +350,31 @@ export class AppComponent implements OnInit {
         content: suggestion.suggestion 
       });
       this.toastr.info(`Suggestion applied: ${suggestion.suggestion}`, 'Suggestion Used');
+    }
+  }
+  
+  executeSuggestedQuery(suggestedQuery: string) {
+    if (!this.currentConnectionId) {
+      this.toastr.warning('Please select a connection first', 'No Connection');
+      return;
+    }
+    
+    // Add a new cell with the suggested query
+    this.addNewCell();
+    
+    // Update the new cell with the suggested query
+    const targetCell = this.cells[this.cells.length - 1];
+    if (targetCell) {
+      this.notebookService.updateCell(targetCell.id, { 
+        content: suggestedQuery 
+      });
+      
+      // Automatically execute the suggested query
+      setTimeout(() => {
+        this.executeCell(targetCell);
+      }, 100); // Small delay to ensure UI updates
+      
+      this.toastr.info('Suggested query added and executing...', 'Suggestion Applied');
     }
   }
 }

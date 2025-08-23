@@ -6,6 +6,7 @@ from ..database import get_db
 from ..models import Connection as ConnectionModel
 from ..schemas import Connection, ConnectionCreate, ConnectionUpdate
 from ..services.mssql_service import MSSQLService
+from ..services.connection_service import ConnectionService
 
 router = APIRouter(prefix="/api/connections", tags=["connections"])
 
@@ -48,7 +49,10 @@ async def create_connection(
 ):
     """Create a new connection"""
     # Test the connection first
-    is_valid, message = await MSSQLService.test_connection_async(connection.connection_string)
+    is_valid, message = await ConnectionService.test_connection_async(
+        connection.connection_string,
+        connection.database_type
+    )
     
     if not is_valid:
         raise HTTPException(
@@ -95,7 +99,11 @@ async def update_connection(
     
     # Test new connection string if provided
     if connection_update.connection_string:
-        is_valid, message = await MSSQLService.test_connection_async(connection_update.connection_string)
+        db_type = connection_update.database_type or connection.database_type
+        is_valid, message = await ConnectionService.test_connection_async(
+            connection_update.connection_string,
+            db_type
+        )
         
         if not is_valid:
             raise HTTPException(
@@ -152,7 +160,10 @@ async def test_connection(
             detail="Connection not found"
         )
     
-    is_valid, message = await MSSQLService.test_connection_async(connection.connection_string)
+    is_valid, message = await ConnectionService.test_connection_async(
+        connection.connection_string,
+        connection.database_type
+    )
     
     return {
         "success": is_valid,

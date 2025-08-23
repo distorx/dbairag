@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from .config import settings
 from .database import engine
 from .models import Base
-from .routers import connections, queries, hints
+from .routers import connections, queries, hints, fuzzy_test
 from .services.redis_service import redis_service
 import logging
 
@@ -62,6 +62,7 @@ app.add_middleware(
 app.include_router(connections.router)
 app.include_router(queries.router)
 app.include_router(hints.router)
+app.include_router(fuzzy_test.router)
 
 @app.get("/")
 async def root():

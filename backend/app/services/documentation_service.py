@@ -223,7 +223,7 @@ class DocumentationService:
         
         return params
     
-    async def get_database_documentation(self, connection_string: str) -> Dict[str, Any]:
+    async def get_database_documentation(self, connection_string: str, force_refresh: bool = False) -> Dict[str, Any]:
         """Generate comprehensive database documentation"""
         try:
             # Parse connection string
