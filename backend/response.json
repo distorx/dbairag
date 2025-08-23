@@ -1,0 +1,1 @@
+{"id":null,"prompt":"SELECT TOP 5 * FROM HighSchools WITH (NOLOCK)","generated_sql":null,"result_type":"error","result_data":{"error":"Object of type Timestamp is not JSON serializable"},"execution_time":1175,"created_at":null}

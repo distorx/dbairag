@@ -1,0 +1,58 @@
+{
+  "enums": {
+    "ApplicationStatus": {
+      "description": "Status of scholarship applications",
+      "values": {
+        "DRAFT": {
+          "value": 1,
+          "description": "Application is being drafted"
+        },
+        "SUBMITTED": {
+          "value": 2,
+          "description": "Application has been submitted"
+        },
+        "UNDER_REVIEW": {
+          "value": 3,
+          "description": "Application is under review"
+        },
+        "APPROVED": {
+          "value": 4,
+          "description": "Application has been approved"
+        },
+        "REJECTED": {
+          "value": 5,
+          "description": "Application has been rejected"
+        },
+        "CANCELLED": {
+          "value": 6,
+          "description": "Application has been cancelled"
+        }
+      }
+    },
+    "DocumentType": {
+      "description": "Types of documents required for applications",
+      "values": {
+        "ID_CARD": {
+          "value": 1,
+          "description": "National ID card"
+        },
+        "TRANSCRIPT": {
+          "value": 2,
+          "description": "Academic transcript"
+        },
+        "RECOMMENDATION_LETTER": {
+          "value": 3,
+          "description": "Letter of recommendation"
+        },
+        "INCOME_STATEMENT": {
+          "value": 4,
+          "description": "Income statement or proof of income"
+        },
+        "OTHER": {
+          "value": 99,
+          "description": "Other document types"
+        }
+      }
+    }
+  }
+}

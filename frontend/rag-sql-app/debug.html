@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Debug Frontend</title>
+</head>
+<body>
+    <h1>Frontend Debug</h1>
+    <div id="status"></div>
+    <pre id="output"></pre>
+    
+    <script>
+        const status = document.getElementById('status');
+        const output = document.getElementById('output');
+        
+        // Test 1: Check if Angular loads
+        status.innerHTML = 'Testing Angular app...';
+        
+        fetch('http://localhost:4200/main.js')
+            .then(response => response.text())
+            .then(text => {
+                if (text.includes('AppComponent')) {
+                    output.innerHTML += '✅ Angular app code loaded\n';
+                } else {
+                    output.innerHTML += '❌ Angular app code not found\n';
+                }
+            });
+            
+        // Test 2: Check if API is accessible
+        fetch('http://localhost:8000/api/connections/')
+            .then(response => response.json())
+            .then(data => {
+                output.innerHTML += '✅ Backend API accessible\n';
+                output.innerHTML += 'Connections found: ' + JSON.stringify(data, null, 2).substring(0, 200) + '\n';
+            })
+            .catch(err => {
+                output.innerHTML += '❌ Backend API error: ' + err + '\n';
+            });
+            
+        // Test 3: Check if app-root exists
+        setTimeout(() => {
+            const iframe = document.createElement('iframe');
+            iframe.src = 'http://localhost:4200';
+            iframe.width = '100%';
+            iframe.height = '600';
+            iframe.onload = function() {
+                try {
+                    const appRoot = iframe.contentDocument.querySelector('app-root');
+                    if (appRoot) {
+                        output.innerHTML += '✅ app-root element exists\n';
+                        const content = appRoot.innerHTML;
+                        if (content && content.length > 0) {
+                            output.innerHTML += '✅ app-root has content: ' + content.substring(0, 100) + '\n';
+                        } else {
+                            output.innerHTML += '⚠️ app-root is empty - Angular may not be rendering\n';
+                        }
+                    } else {
+                        output.innerHTML += '❌ app-root element not found\n';
+                    }
+                } catch(e) {
+                    output.innerHTML += '⚠️ Cannot access iframe content (CORS)\n';
+                }
+            };
+            document.body.appendChild(iframe);
+        }, 1000);
+    </script>
+</body>
+</html>

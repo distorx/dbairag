@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Angular App Test</title>
+</head>
+<body>
+    <h1>Testing Angular App</h1>
+    <iframe src="http://localhost:4200" width="100%" height="600" style="border: 1px solid black;"></iframe>
+    
+    <h2>Direct Component Test</h2>
+    <div id="test"></div>
+    
+    <script>
+        fetch('http://localhost:4200')
+            .then(response => response.text())
+            .then(html => {
+                console.log('HTML loaded:', html.substring(0, 500));
+                document.getElementById('test').innerHTML = 'HTML loaded successfully';
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                document.getElementById('test').innerHTML = 'Error: ' + error;
+            });
+    </script>
+</body>
+</html>
