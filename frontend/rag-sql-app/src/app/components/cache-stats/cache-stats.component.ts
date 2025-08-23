@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import { Component, OnInit, OnDestroy, Input } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ApiService, CacheStats } from '../../services/api.service';
 import { ToastrService } from 'ngx-toastr';
@@ -13,18 +13,27 @@ import { takeUntil } from 'rxjs/operators';
     <div class="bg-white rounded-lg shadow-md p-4 h-full">
       <div class="flex justify-between items-center mb-3">
         <h3 class="text-lg font-semibold">Cache Performance</h3>
-        <div class="flex gap-2">
+        <div class="flex gap-1">
+          <button 
+            (click)="refreshAllMetadata()"
+            [disabled]="refreshingAll"
+            title="Refresh all database metadata (schemas, enums, documentation)"
+            class="bg-blue-500 text-white px-2 py-1 rounded text-xs hover:bg-blue-600 disabled:opacity-50">
+            {{ refreshingAll ? '🔄' : '🔄 All' }}
+          </button>
           <button 
             (click)="warmCache()"
             [disabled]="warming"
-            class="bg-green-500 text-white px-3 py-1 rounded text-sm hover:bg-green-600 disabled:opacity-50">
-            {{ warming ? 'Warming...' : 'Warm Cache' }}
+            title="Pre-load cache with hints and patterns"
+            class="bg-green-500 text-white px-2 py-1 rounded text-xs hover:bg-green-600 disabled:opacity-50">
+            {{ warming ? '⚡' : '⚡ Warm' }}
           </button>
           <button 
             (click)="invalidateCache()"
             [disabled]="invalidating"
-            class="bg-red-500 text-white px-3 py-1 rounded text-sm hover:bg-red-600 disabled:opacity-50">
-            {{ invalidating ? 'Clearing...' : 'Clear Cache' }}
+            title="Clear all cached data"
+            class="bg-red-500 text-white px-2 py-1 rounded text-xs hover:bg-red-600 disabled:opacity-50">
+            {{ invalidating ? '🗑️' : '🗑️ Clear' }}
           </button>
         </div>
       </div>
@@ -95,9 +104,12 @@ import { takeUntil } from 'rxjs/operators';
   `
 })
 export class CacheStatsComponent implements OnInit, OnDestroy {
+  @Input() currentConnectionId: number | null = null;
+  
   stats: CacheStats | null = null;
   warming = false;
   invalidating = false;
+  refreshingAll = false;
   
   private destroy$ = new Subject<void>();
   
@@ -164,5 +176,43 @@ export class CacheStatsComponent implements OnInit, OnDestroy {
         this.invalidating = false;
       }
     });
+  }
+  
+  async refreshAllMetadata() {
+    if (!this.currentConnectionId) {
+      this.toastr.warning('Please select a database connection first', 'No Connection');
+      return;
+    }
+    
+    this.refreshingAll = true;
+    let refreshedCount = 0;
+    
+    try {
+      // 1. Refresh documentation (which includes schema information)
+      await this.apiService.refreshDocumentation(this.currentConnectionId).toPromise();
+      refreshedCount++;
+      
+      // 2. Clear and reload enums by invalidating connection-specific cache
+      await this.apiService.invalidateCache(this.currentConnectionId).toPromise();
+      refreshedCount++;
+      
+      // 3. Warm cache with fresh data
+      await this.apiService.warmCache().toPromise();
+      refreshedCount++;
+      
+      // Reload stats to show updated cache
+      this.loadStats();
+      
+      this.toastr.success(
+        'All database metadata refreshed! Fresh schemas, enums, and documentation are now available.',
+        'Complete Refresh Done'
+      );
+      
+    } catch (err: any) {
+      const errorMsg = err.error?.detail || 'Failed to refresh all metadata';
+      this.toastr.error(errorMsg, 'Refresh Failed');
+    } finally {
+      this.refreshingAll = false;
+    }
   }
 }

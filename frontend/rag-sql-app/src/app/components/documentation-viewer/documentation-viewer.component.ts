@@ -89,8 +89,15 @@ interface ProcedureInfo {
           <button
             (click)="refreshDocumentation()"
             [disabled]="loading"
-            class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 disabled:opacity-50">
-            {{ loading ? 'Refreshing...' : 'Refresh' }}
+            class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 disabled:opacity-50 relative">
+            <span *ngIf="!loading">🔄 Refresh</span>
+            <span *ngIf="loading" class="flex items-center">
+              <svg class="animate-spin h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              Refreshing...
+            </span>
           </button>
           <button
             (click)="downloadDocumentation()"
@@ -103,8 +110,12 @@ interface ProcedureInfo {
       
       <!-- Loading State -->
       <div *ngIf="loading" class="text-center py-8">
-        <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
-        <p class="mt-2 text-gray-600">Generating documentation...</p>
+        <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-green-500"></div>
+        <p class="mt-2 text-gray-600">
+          <span *ngIf="!documentation">Generating fresh documentation from database...</span>
+          <span *ngIf="documentation">Refreshing documentation with latest database changes...</span>
+        </p>
+        <p class="mt-1 text-sm text-gray-500">This ensures you have the most current schema, enums, and relationships</p>
       </div>
       
       <!-- Error State -->
@@ -434,9 +445,13 @@ export class DocumentationViewerComponent implements OnInit {
     try {
       await this.apiService.refreshDocumentation(this.connectionId).toPromise();
       await this.loadDocumentation();
-      this.toastr.success('Documentation refreshed', 'Success');
-    } catch (err) {
-      this.toastr.error('Failed to refresh documentation', 'Error');
+      this.toastr.success(
+        'Documentation refreshed with latest database schema, enums, and relationships!', 
+        'Fresh Data Loaded'
+      );
+    } catch (err: any) {
+      const errorMsg = err.error?.detail || 'Failed to refresh documentation';
+      this.toastr.error(errorMsg, 'Refresh Failed');
       this.loading = false;
     }
   }

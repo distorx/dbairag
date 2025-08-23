@@ -52,7 +52,7 @@ import { ApiService, QueryHint, Suggestion } from './services/api.service';
             
             <!-- Cache Stats -->
             <div class="lg:col-span-2">
-              <app-cache-stats></app-cache-stats>
+              <app-cache-stats [currentConnectionId]="currentConnectionId"></app-cache-stats>
             </div>
           </div>
         </div>
