@@ -1,19 +1,25 @@
-import { Component, Input, Output, EventEmitter, ViewChild, ElementRef } from '@angular/core';
+import { Component, Input, Output, EventEmitter, ViewChild, ElementRef, OnChanges, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ToastrService } from 'ngx-toastr';
 import { Cell } from '../../services/notebook.service';
 import { saveAs } from 'file-saver';
 import { QueryAutocompleteComponent } from '../query-autocomplete/query-autocomplete.component';
+import { StorageService } from '../../services/storage.service';
+import { AgGridAngular } from 'ag-grid-angular';
+import { ColDef, GridOptions, GridApi, GridReadyEvent, ModuleRegistry, AllCommunityModule, themeQuartz } from 'ag-grid-community';
+
+// Register AG-Grid modules
+ModuleRegistry.registerModules([AllCommunityModule]);
 
 @Component({
   selector: 'app-notebook-cell',
   standalone: true,
-  imports: [CommonModule, FormsModule, QueryAutocompleteComponent],
+  imports: [CommonModule, FormsModule, QueryAutocompleteComponent, AgGridAngular],
   template: `
-    <div class="mb-4 bg-white rounded-lg shadow-sm border border-gray-200">
+    <div class="mb-2 bg-white rounded shadow-sm border border-gray-200">
       <!-- Prompt Cell -->
-      <div *ngIf="cell.type === 'prompt'" class="p-4">
+      <div *ngIf="cell.type === 'prompt'" class="p-3">
         <div class="flex items-start gap-2">
           <span class="text-gray-500 font-mono text-sm mt-2">[{{ cellIndex + 1 }}]</span>
           <app-query-autocomplete
@@ -27,13 +33,13 @@ import { QueryAutocompleteComponent } from '../query-autocomplete/query-autocomp
             <button 
               (click)="execute.emit()"
               [disabled]="!cell.content || (cell.isExecuting || false)"
-              class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 disabled:opacity-50">
+              class="bg-green-500 text-white px-3 py-1.5 rounded hover:bg-green-600 disabled:opacity-50 text-sm">
               {{ cell.isExecuting ? 'Running...' : 'Run' }}
             </button>
             <button 
               (click)="delete.emit()"
               [disabled]="cell.isExecuting || false"
-              class="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600 disabled:opacity-50">
+              class="bg-gray-500 text-white px-3 py-1.5 rounded hover:bg-gray-600 disabled:opacity-50 text-sm">
               Delete
             </button>
           </div>
@@ -41,19 +47,19 @@ import { QueryAutocompleteComponent } from '../query-autocomplete/query-autocomp
       </div>
       
       <!-- Response Cell -->
-      <div *ngIf="cell.type === 'response'" class="p-4">
+      <div *ngIf="cell.type === 'response'" class="p-3">
         <div class="flex items-start gap-2">
           <span class="text-gray-500 font-mono text-sm">Out[{{ cellIndex }}]</span>
           
           <div class="flex-1">
             <!-- SQL Query Display -->
-            <div *ngIf="cell.content" class="mb-3">
-              <div class="text-sm text-gray-600 mb-1">Generated SQL:</div>
-              <pre class="bg-gray-100 p-2 rounded text-sm overflow-x-auto">{{ cell.content }}</pre>
+            <div *ngIf="cell.content" class="mb-2">
+              <div class="text-xs text-gray-600 mb-1">Generated SQL:</div>
+              <pre class="bg-gray-100 p-2 rounded text-xs whitespace-pre-wrap break-words font-mono">{{ cell.content }}</pre>
             </div>
             
             <!-- Execution Time and Retry Info -->
-            <div class="flex items-center gap-3 text-sm text-gray-500 mb-2">
+            <div class="flex items-center gap-2 text-xs text-gray-500 mb-2">
               <span *ngIf="cell.execution_time">
                 Executed in {{ cell.execution_time }}ms
               </span>
@@ -70,22 +76,22 @@ import { QueryAutocompleteComponent } from '../query-autocomplete/query-autocomp
             
             <!-- Retry Details Panel -->
             <div *ngIf="showRetryDetails && hasRetryInfo()" 
-                 class="mb-4 bg-blue-50 border border-blue-200 rounded-lg p-4">
-              <h4 class="text-sm font-semibold text-blue-800 mb-3">
+                 class="mb-3 bg-blue-50 border border-blue-200 rounded p-3">
+              <h4 class="text-xs font-semibold text-blue-800 mb-2">
                 🔄 Retry Analysis - {{ getRetryAttempts() }} Total Attempts
               </h4>
               <div class="space-y-3">
                 <div *ngFor="let attempt of getRetryLog(); let i = index" 
                      class="flex items-start gap-3 text-sm p-3 rounded border"
                      [class.bg-white]="attempt.status === 'success'"
-                     [class.bg-red-50]="attempt.status === 'failed'"
+                     [class.bg-gray-50]="attempt.status === 'failed'"
                      [class.border-green-200]="attempt.status === 'success'"
-                     [class.border-red-200]="attempt.status === 'failed'">
+                     [class.border-gray-300]="attempt.status === 'failed'">
                   
                   <!-- Status Icon -->
                   <div class="flex-shrink-0 mt-0.5">
                     <span *ngIf="attempt.status === 'success'" class="text-green-500 text-lg">✓</span>
-                    <span *ngIf="attempt.status === 'failed'" class="text-red-500 text-lg">✗</span>
+                    <span *ngIf="attempt.status === 'failed'" class="text-gray-500 text-lg">✗</span>
                   </div>
                   
                   <!-- Attempt Details -->
@@ -95,8 +101,8 @@ import { QueryAutocompleteComponent } from '../query-autocomplete/query-autocomp
                       <span class="text-xs px-2 py-1 rounded font-medium"
                             [class.bg-green-100]="attempt.status === 'success'"
                             [class.text-green-700]="attempt.status === 'success'"
-                            [class.bg-red-100]="attempt.status === 'failed'"
-                            [class.text-red-700]="attempt.status === 'failed'">
+                            [class.bg-gray-100]="attempt.status === 'failed'"
+                            [class.text-gray-700]="attempt.status === 'failed'">
                         {{ attempt.status | uppercase }}
                       </span>
                       <span *ngIf="attempt.error_type" 
@@ -105,7 +111,7 @@ import { QueryAutocompleteComponent } from '../query-autocomplete/query-autocomp
                       </span>
                     </div>
                     
-                    <div *ngIf="attempt.error_message" class="text-red-700 text-xs mb-2 font-mono bg-red-50 p-2 rounded">
+                    <div *ngIf="attempt.error_message" class="text-gray-700 text-xs mb-2 font-mono bg-gray-50 p-2 rounded">
                       {{ attempt.error_message }}
                     </div>
                     
@@ -147,8 +153,8 @@ import { QueryAutocompleteComponent } from '../query-autocomplete/query-autocomp
             </div>
             
             <!-- Error Display -->
-            <div *ngIf="cell.result_type === 'error'" class="bg-red-50 border border-red-200 rounded p-3">
-              <div class="text-red-800 mb-3">
+            <div *ngIf="cell.result_type === 'error'" class="bg-gray-50 border border-gray-300 rounded p-2">
+              <div class="text-gray-800 mb-2 text-sm">
                 {{ cell.result_data?.error || cell.result_data }}
               </div>
               
@@ -167,7 +173,7 @@ import { QueryAutocompleteComponent } from '../query-autocomplete/query-autocomp
                       <div class="flex justify-between items-start">
                         <div class="flex-1">
                           <p class="text-sm text-blue-800 font-medium">{{ suggestion.description }}</p>
-                          <div class="mt-2 bg-gray-100 p-2 rounded text-xs font-mono overflow-x-auto">
+                          <div class="mt-2 bg-gray-100 p-2 rounded text-xs font-mono whitespace-pre-wrap break-words">
                             {{ suggestion.query }}
                           </div>
                           <div class="mt-1 text-xs text-gray-600">
@@ -176,7 +182,7 @@ import { QueryAutocompleteComponent } from '../query-autocomplete/query-autocomp
                         </div>
                         <button 
                           (click)="executeSuggestedQuery(suggestion.query)"
-                          class="ml-3 bg-green-500 text-white px-3 py-1 rounded text-xs hover:bg-green-600 flex items-center gap-1">
+                          class="ml-2 bg-green-500 text-white px-2 py-1 rounded text-xs hover:bg-green-600 flex items-center gap-1">
                           ▶️ Run
                         </button>
                       </div>
@@ -267,8 +273,8 @@ import { QueryAutocompleteComponent } from '../query-autocomplete/query-autocomp
             <!-- Table Result -->
             <div *ngIf="cell.result_type === 'table' && cell.result_data">
               <div class="mb-2 flex justify-between items-center">
-                <span class="text-sm text-gray-600">
-                  {{ cell.result_data.row_count || 0 }} rows
+                <span class="text-sm text-gray-600 font-medium">
+                  Total: {{ getTotalRows() }} rows
                 </span>
                 <button 
                   (click)="exportToCSV()"
@@ -277,43 +283,21 @@ import { QueryAutocompleteComponent } from '../query-autocomplete/query-autocomp
                 </button>
               </div>
               
-              <div class="overflow-x-auto max-w-full border border-gray-300 rounded">
-                <table class="w-full border-collapse">
-                  <thead class="sticky top-0 bg-gray-100 z-10">
-                    <tr>
-                      <th *ngFor="let col of cell.result_data.columns" 
-                          class="border-b border-r border-gray-300 px-3 py-2 text-left text-xs font-semibold text-gray-700 whitespace-nowrap">
-                        {{ col }}
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr *ngFor="let row of getDisplayRows()" class="hover:bg-gray-50">
-                      <td *ngFor="let col of cell.result_data.columns" 
-                          class="border-b border-r border-gray-300 px-3 py-2 text-sm whitespace-nowrap">
-                        <span [title]="formatCellValue(row[col])">
-                          {{ formatCellValueWithLookup(row, col) }}
-                        </span>
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-              
-              <div *ngIf="cell.result_data.data?.length > maxDisplayRows" class="mt-2 text-sm text-gray-600">
-                Showing {{ maxDisplayRows }} of {{ cell.result_data.data.length }} rows
-                <button 
-                  (click)="showAllRows = !showAllRows"
-                  class="ml-2 text-blue-500 hover:underline">
-                  {{ showAllRows ? 'Show less' : 'Show all' }}
-                </button>
-              </div>
+              <!-- AG-Grid Table -->
+              <ag-grid-angular
+                style="width: 100%; height: 500px;"
+                [rowData]="cell.result_data.data"
+                [columnDefs]="columnDefs"
+                [defaultColDef]="defaultColDef"
+                [gridOptions]="gridOptions"
+                (gridReady)="onGridReady($event)">
+              </ag-grid-angular>
             </div>
           </div>
           
           <button 
             (click)="delete.emit()"
-            class="text-red-500 hover:text-red-700">
+            class="text-gray-500 hover:text-gray-700">
             ×
           </button>
         </div>
@@ -322,7 +306,7 @@ import { QueryAutocompleteComponent } from '../query-autocomplete/query-autocomp
   `,
   styles: []
 })
-export class NotebookCellComponent {
+export class NotebookCellComponent implements OnChanges, OnInit {
   @Input() cell!: Cell;
   @Input() cellIndex: number = 0;
   @Output() execute = new EventEmitter<void>();
@@ -332,11 +316,79 @@ export class NotebookCellComponent {
   
   @ViewChild('promptInput') promptInput?: ElementRef<HTMLTextAreaElement>;
   
-  maxDisplayRows = 100;
-  showAllRows = false;
+  // Pagination properties
+  currentPage = 1;
+  pageSize = 25;
+  pageSizeOptions = [10, 25, 50, 100];
   showRetryDetails = false;
   
-  constructor(private toastr: ToastrService) {}
+  // AG-Grid properties
+  columnDefs: ColDef[] = [];
+  defaultColDef: ColDef = {
+    sortable: true,
+    filter: true,
+    resizable: true,
+    minWidth: 100,
+    floatingFilter: false
+  };
+  gridOptions: GridOptions = {
+    theme: themeQuartz,
+    enableCellTextSelection: true,
+    ensureDomOrder: true,
+    rowSelection: {
+      mode: 'multiRow',
+      enableClickSelection: false,
+      enableSelectionWithoutKeys: true
+    },
+    animateRows: true,
+    pagination: true,
+    paginationPageSize: 25,
+    paginationPageSizeSelector: [10, 25, 50, 100],
+    suppressMenuHide: true,
+    domLayout: 'normal',
+    rowHeight: 40,
+    headerHeight: 45
+  };
+  private gridApi!: GridApi;
+  
+  constructor(
+    private toastr: ToastrService,
+    private storageService: StorageService
+  ) {}
+  
+  ngOnInit() {
+    // Load user preferences
+    const preferences = this.storageService.getPreferences();
+    if (preferences && preferences.pageSize) {
+      this.pageSize = preferences.pageSize;
+    }
+  }
+  
+  ngOnChanges() {
+    // Reset pagination when result data changes
+    if (this.cell.result_data) {
+      this.currentPage = 1;
+      
+      // Set up AG-Grid column definitions
+      if (this.cell.result_data.columns) {
+        this.columnDefs = this.cell.result_data.columns.map((col: string) => ({
+          field: col,
+          headerName: col,
+          filter: 'agTextColumnFilter',
+          floatingFilter: true,
+          cellRenderer: (params: any) => {
+            return this.formatCellValueWithLookup(params.data, col);
+          }
+        }));
+        
+        // Refresh grid if it's already initialized
+        if (this.gridApi) {
+          this.gridApi.setGridOption('columnDefs', this.columnDefs);
+          this.gridApi.setGridOption('rowData', this.cell.result_data.data);
+        }
+      }
+    }
+  }
   
   onKeyDown(event: KeyboardEvent) {
     // Shift+Enter to execute
@@ -357,11 +409,97 @@ export class NotebookCellComponent {
   getDisplayRows() {
     if (!this.cell.result_data?.data) return [];
     
-    if (this.showAllRows) {
-      return this.cell.result_data.data;
+    const startIndex = (this.currentPage - 1) * this.pageSize;
+    const endIndex = startIndex + this.pageSize;
+    
+    return this.cell.result_data.data.slice(startIndex, endIndex);
+  }
+  
+  getTotalPages(): number {
+    if (!this.cell.result_data?.data) return 0;
+    return Math.ceil(this.cell.result_data.data.length / this.pageSize);
+  }
+  
+  getTotalRows(): number {
+    return this.cell.result_data?.data?.length || 0;
+  }
+  
+  getPageNumbers(): number[] {
+    const totalPages = this.getTotalPages();
+    const maxPagesToShow = 5;
+    const pages: number[] = [];
+    
+    if (totalPages <= maxPagesToShow) {
+      for (let i = 1; i <= totalPages; i++) {
+        pages.push(i);
+      }
+    } else {
+      // Show first page, last page, current page and neighbors
+      const startPage = Math.max(1, this.currentPage - 2);
+      const endPage = Math.min(totalPages, this.currentPage + 2);
+      
+      for (let i = startPage; i <= endPage; i++) {
+        pages.push(i);
+      }
+      
+      // Add first page if not included
+      if (startPage > 1) {
+        pages.unshift(1);
+        if (startPage > 2) {
+          pages.splice(1, 0, -1); // -1 represents ellipsis
+        }
+      }
+      
+      // Add last page if not included
+      if (endPage < totalPages) {
+        if (endPage < totalPages - 1) {
+          pages.push(-1); // -1 represents ellipsis
+        }
+        pages.push(totalPages);
+      }
     }
     
-    return this.cell.result_data.data.slice(0, this.maxDisplayRows);
+    return pages;
+  }
+  
+  goToPage(page: number) {
+    if (page > 0 && page <= this.getTotalPages()) {
+      this.currentPage = page;
+    }
+  }
+  
+  nextPage() {
+    if (this.currentPage < this.getTotalPages()) {
+      this.currentPage++;
+    }
+  }
+  
+  previousPage() {
+    if (this.currentPage > 1) {
+      this.currentPage--;
+    }
+  }
+  
+  onPageSizeChange(newSize: number) {
+    this.pageSize = newSize;
+    this.currentPage = 1;
+    
+    // Update AG-Grid page size
+    if (this.gridApi) {
+      this.gridOptions.paginationPageSize = newSize;
+      this.gridApi.setGridOption('paginationPageSize', newSize);
+    }
+    
+    // Save user preference
+    const preferences = this.storageService.getPreferences();
+    preferences.pageSize = newSize;
+    this.storageService.savePreferences(preferences);
+  }
+  
+  getDisplayRange(): string {
+    const start = (this.currentPage - 1) * this.pageSize + 1;
+    const end = Math.min(this.currentPage * this.pageSize, this.getTotalRows());
+    return `${start}-${end}`;
   }
   
   formatCellValue(value: any): string {
@@ -395,40 +533,56 @@ export class NotebookCellComponent {
   }
   
   exportToCSV() {
-    if (!this.cell.result_data?.columns || !this.cell.result_data?.data) {
-      this.toastr.warning('No data to export', 'Warning');
-      return;
-    }
-    
-    const columns = this.cell.result_data.columns;
-    const data = this.cell.result_data.data;
-    
-    // Create CSV content
-    const csvRows = [];
-    
-    // Header
-    csvRows.push(columns.map((col: string) => `"${col}"`).join(','));
-    
-    // Data rows
-    for (const row of data) {
-      const values = columns.map((col: string) => {
-        const value = row[col];
-        if (value === null || value === undefined) {
-          return '""';
-        }
-        // Escape quotes and wrap in quotes
-        return `"${String(value).replace(/"/g, '""')}"`;
+    if (this.gridApi) {
+      // Use AG-Grid's built-in CSV export
+      this.gridApi.exportDataAsCsv({
+        fileName: `query_result_${new Date().toISOString().replace(/[:.]/g, '-')}.csv`,
+        allColumns: true
       });
-      csvRows.push(values.join(','));
+      this.toastr.success('Data exported to CSV', 'Export Successful');
+    } else if (this.cell.result_data?.columns && this.cell.result_data?.data) {
+      // Fallback to manual CSV generation
+      const columns = this.cell.result_data.columns;
+      const data = this.cell.result_data.data;
+      
+      const csvRows = [];
+      csvRows.push(columns.map((col: string) => `"${col}"`).join(','));
+      
+      for (const row of data) {
+        const values = columns.map((col: string) => {
+          const value = row[col];
+          if (value === null || value === undefined) {
+            return '""';
+          }
+          return `"${String(value).replace(/"/g, '""')}"`;
+        });
+        csvRows.push(values.join(','));
+      }
+      
+      const csvContent = csvRows.join('\n');
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8' });
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const filename = `query_result_${timestamp}.csv`;
+      saveAs(blob, filename);
+      
+      this.toastr.success(`Exported ${data.length} rows to ${filename}`, 'Export Successful');
+    } else {
+      this.toastr.warning('No data to export', 'Warning');
     }
+  }
+  
+  onGridReady(params: GridReadyEvent) {
+    this.gridApi = params.api;
     
-    const csvContent = csvRows.join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8' });
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const filename = `query_result_${timestamp}.csv`;
-    saveAs(blob, filename);
+    // Auto-size columns to fit content
+    setTimeout(() => {
+      this.gridApi.sizeColumnsToFit();
+    }, 100);
     
-    this.toastr.success(`Exported ${data.length} rows to ${filename}`, 'Export Successful');
+    // Set initial page size from preferences
+    if (this.pageSize) {
+      this.gridApi.setGridOption('paginationPageSize', this.pageSize);
+    }
   }
   
   // Retry information helper methods

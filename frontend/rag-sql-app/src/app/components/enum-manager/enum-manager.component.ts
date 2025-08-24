@@ -9,18 +9,28 @@ import { ToastrService } from 'ngx-toastr';
   standalone: true,
   imports: [CommonModule, FormsModule],
   template: `
-    <div class="bg-white rounded-lg shadow-md p-4 h-full">
-      <div class="flex justify-between items-center mb-3">
-        <h3 class="text-lg font-semibold">Enum Files</h3>
-        <button 
-          (click)="toggleUpload()"
-          class="bg-green-500 text-white px-3 py-1 rounded text-sm hover:bg-green-600">
-          {{ showUpload ? 'Cancel' : 'Upload' }}
-        </button>
+    <div class="bg-white rounded-xl shadow-lg border border-gray-100 overflow-hidden h-full">
+      <!-- Header -->
+      <div class="bg-gradient-to-r from-emerald-600 to-teal-600 px-3 py-2">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"></path>
+            </svg>
+            <h3 class="text-sm font-semibold text-white">Enum Files</h3>
+          </div>
+          <button 
+            (click)="toggleUpload()"
+            class="bg-white/20 text-white px-2 py-0.5 rounded text-xs hover:bg-white/30">
+            {{ showUpload ? 'Cancel' : 'Upload' }}
+          </button>
+        </div>
       </div>
       
+      <div class="p-3">
+      
       <!-- Upload form -->
-      <div *ngIf="showUpload" class="mb-4 p-3 bg-gray-50 rounded">
+      <div *ngIf="showUpload" class="mb-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
         <div class="mb-2">
           <label class="block text-sm font-medium text-gray-700 mb-1">
             Select JSON file
@@ -49,7 +59,7 @@ import { ToastrService } from 'ngx-toastr';
         <button 
           (click)="uploadFile()"
           [disabled]="!selectedFile || uploading"
-          class="bg-blue-500 text-white px-4 py-2 rounded text-sm hover:bg-blue-600 disabled:opacity-50">
+          class="bg-gradient-to-r from-emerald-600 to-teal-600 text-white px-3 py-1.5 rounded text-sm hover:from-emerald-700 hover:to-teal-700 disabled:opacity-50">
           {{ uploading ? 'Uploading...' : 'Upload File' }}
         </button>
       </div>
@@ -65,9 +75,9 @@ import { ToastrService } from 'ngx-toastr';
       
       <div class="space-y-2">
         <div *ngFor="let file of enumFiles" 
-             class="flex items-center justify-between p-2 hover:bg-gray-50 rounded">
+             class="flex items-center justify-between p-2 hover:bg-gray-50 rounded-lg border border-gray-100">
           <div class="flex-1">
-            <div class="font-medium text-sm">{{ file.original_filename }}</div>
+            <div class="font-medium text-sm text-gray-800">{{ file.original_filename }}</div>
             <div class="text-xs text-gray-500">
               {{ file.description || 'No description' }}
             </div>
@@ -77,14 +87,15 @@ import { ToastrService } from 'ngx-toastr';
           </div>
           <button 
             (click)="deleteFile(file)"
-            class="text-red-500 hover:text-red-700 p-1">
-            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            class="text-gray-500 hover:text-gray-700 p-1">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
                     d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16">
               </path>
             </svg>
           </button>
         </div>
+      </div>
       </div>
     </div>
   `

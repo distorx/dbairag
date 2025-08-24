@@ -6,6 +6,7 @@ from .database import engine
 from .models import Base
 from .routers import connections, queries, hints, fuzzy_test
 from .services.redis_service import redis_service
+from .services.hints_storage_service import hints_storage
 import logging
 
 logger = logging.getLogger(__name__)
@@ -28,11 +29,19 @@ async def lifespan(app: FastAPI):
         else:
             logger.warning("Redis cache initialization failed, running without cache")
     
+    # Initialize MongoDB for hints storage
+    try:
+        await hints_storage.connect()
+        logger.info("MongoDB hints storage initialized successfully")
+    except Exception as e:
+        logger.warning(f"MongoDB hints storage initialization failed: {e}")
+    
     yield
     
     # Shutdown
     if redis_service.is_connected:
         await redis_service.disconnect()
+    await hints_storage.disconnect()
     await engine.dispose()
 
 app = FastAPI(

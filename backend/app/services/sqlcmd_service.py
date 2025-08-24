@@ -47,9 +47,9 @@ class SQLCmdService:
                 '-U', params['username'],
                 '-P', params['password'],
                 '-Q', query,
-                '-h', '-1',  # No headers
                 '-W',        # Remove trailing spaces
-                '-s', '|'    # Column separator
+                '-s', '|',   # Column separator
+                '-w', '999'  # Wide output to prevent wrapping
             ]
             
             logger.info(f"🔧 SQLCmd: Executing query: {query}")
@@ -96,26 +96,17 @@ class SQLCmdService:
         if not data_lines:
             return {"columns": [], "data": [], "row_count": 0}
         
-        # For COUNT queries, return simple structure
-        if original_query.strip().upper().startswith('SELECT COUNT'):
-            try:
-                count_value = int(data_lines[0])
-                return {
-                    "columns": ["total"],
-                    "data": [{"total": count_value}],
-                    "row_count": 1
-                }
-            except ValueError:
-                pass
-        
-        # For other queries with pipe separator
+        # For queries with pipe separator (standard format)
         if '|' in data_lines[0]:
             # First line is headers
             headers = [col.strip() for col in data_lines[0].split('|')]
             data = []
             
-            for line in data_lines[1:]:
-                if line.strip():
+            # Skip separator line (contains dashes)
+            start_idx = 2 if len(data_lines) > 1 and '-' in data_lines[1] else 1
+            
+            for line in data_lines[start_idx:]:
+                if line.strip() and not line.startswith('-'):
                     values = [val.strip() for val in line.split('|')]
                     if len(values) == len(headers):
                         row_dict = {}

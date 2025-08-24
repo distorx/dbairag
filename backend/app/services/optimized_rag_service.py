@@ -43,17 +43,26 @@ class OptimizedRAGService:
     def __init__(self):
         self.llm = None
         self.performance_metrics = {}
+        self.column_intelligence = None
         
-        if settings.openai_api_key:
+        # Initialize column intelligence service
+        try:
+            from .column_intelligence_service import column_intelligence
+            self.column_intelligence = column_intelligence
+            logger.info("✅ OptimizedRAGService: Column Intelligence Service initialized")
+        except ImportError:
+            logger.warning("⚠️ OptimizedRAGService: Column Intelligence Service not available")
+        
+        if settings.openai_api_key and settings.openai_api_key.startswith("sk-"):
             try:
                 self.llm = ChatOpenAI(
                     api_key=settings.openai_api_key,
                     model="gpt-4o-mini",  # Faster, cheaper model
                     temperature=0,
-                    max_tokens=200,  # Limit for SQL queries
-                    timeout=10.0  # 10 second timeout
+                    max_tokens=300,  # Increased for complex queries with full metadata
+                    timeout=15.0  # 15 second timeout
                 )
-                logger.info("🚀 OptimizedRAGService: OpenAI configured with gpt-4o-mini")
+                logger.info("🚀 OptimizedRAGService: OpenAI configured with gpt-4o-mini and full schema awareness")
             except Exception as e:
                 logger.error(f"❌ OptimizedRAGService: OpenAI initialization failed: {e}")
                 self.llm = None
@@ -129,34 +138,177 @@ class OptimizedRAGService:
         
         return enum_mappings
     
-    def _build_optimized_schema_context(self, schema_info: Dict[str, Any]) -> str:
-        """Build minimal, focused schema context for LLM"""
+    def _build_optimized_schema_context(self, schema_info: Dict[str, Any], connection_id: str = None) -> str:
+        """Build comprehensive schema context for accurate SQL generation with column semantics"""
         if not schema_info or "tables" not in schema_info:
             return "No schema information available"
         
-        context = "Database Schema:\n"
+        context = "Database Schema (Complete):\n"
+        context += "=" * 50 + "\n"
+        
         tables = schema_info["tables"]
         
-        # Focus on key tables and relationships
-        for table_name, table_data in list(tables.items())[:5]:  # Limit to 5 tables
-            context += f"\n{table_name}:\n"
-            
-            # Key columns only
-            columns = table_data.get("columns", [])[:10]  # Limit columns
-            for col in columns:
-                context += f"  - {col['name']} ({col['data_type']})\n"
-            
-            # Foreign key relationships - CRITICAL for JOINs
-            fks = table_data.get("foreign_keys", [])
-            if fks:
-                context += "  Relationships:\n"
-                for fk in fks:
-                    context += f"    {fk['column']} → {fk['referenced_table']}.{fk['referenced_column']}\n"
+        # Get semantic analysis if available
+        semantic_analysis = None
+        if self.column_intelligence and schema_info:
+            semantic_analysis = self.column_intelligence.analyze_column_semantics(schema_info)
         
-        # Add common patterns
-        context += "\nCommon Patterns:\n"
-        context += "- 'count X with Y' = JOIN tables and COUNT DISTINCT\n"
+        # Include ALL tables with their complete metadata
+        context += f"Total Tables: {len(tables)}\n\n"
+        
+        # Group tables by category for better organization
+        student_tables = []
+        location_tables = []
+        application_tables = []
+        family_tables = []
+        auth_tables = []
+        other_tables = []
+        
+        for table_name in tables.keys():
+            if table_name.startswith('Student'):
+                student_tables.append(table_name)
+            elif table_name in ['Cities', 'Regions', 'Municipios', 'HighSchools']:
+                location_tables.append(table_name)
+            elif 'Application' in table_name or 'Question' in table_name or 'Answer' in table_name:
+                application_tables.append(table_name)
+            elif 'Family' in table_name or 'Occupation' in table_name or 'Dependent' in table_name:
+                family_tables.append(table_name)
+            elif table_name.startswith('AspNet'):
+                auth_tables.append(table_name)
+            else:
+                other_tables.append(table_name)
+        
+        # Include table details with ALL metadata
+        all_table_groups = [
+            ("STUDENT TABLES", student_tables),
+            ("LOCATION TABLES", location_tables),
+            ("APPLICATION TABLES", application_tables),
+            ("FAMILY TABLES", family_tables),
+            ("AUTH TABLES", auth_tables),
+            ("OTHER TABLES", other_tables)
+        ]
+        
+        for group_name, table_list in all_table_groups:
+            if table_list:
+                context += f"\n{group_name}:\n" + "-" * 40 + "\n"
+                
+                for table_name in table_list:
+                    table_data = tables[table_name]
+                    context += f"\n{table_name}:\n"
+                    
+                    # Primary Keys - CRITICAL for queries
+                    pks = table_data.get("primary_keys", [])
+                    if pks:
+                        context += f"  PRIMARY KEY: {', '.join(pks)}\n"
+                    
+                    # All columns with complete type info
+                    columns = table_data.get("columns", [])
+                    context += f"  Columns ({len(columns)}):\n"
+                    for col in columns:
+                        nullable = "" if col.get('nullable', True) else " NOT NULL"
+                        pk_marker = " [PK]" if col.get('primary_key', False) else ""
+                        context += f"    - {col['name']} ({col.get('data_type', 'unknown')}){nullable}{pk_marker}\n"
+                    
+                    # Foreign Keys - ESSENTIAL for JOINs
+                    fks = table_data.get("foreign_keys", [])
+                    if fks:
+                        context += "  Foreign Keys:\n"
+                        for fk in fks:
+                            context += f"    - {fk['column']} → {fk['referenced_table']}.{fk['referenced_column']}\n"
+                    
+                    # Indexes - IMPORTANT for query optimization
+                    indexes = table_data.get("indexes", [])
+                    if indexes:
+                        context += "  Indexes:\n"
+                        for idx in indexes:
+                            unique = " (UNIQUE)" if idx.get('unique', False) else ""
+                            context += f"    - {idx.get('name', 'unnamed')}: {', '.join(idx.get('columns', []))}{unique}\n"
+        
+        # Add relationship summary for better JOIN understanding
+        context += "\n\nKEY RELATIONSHIPS:\n" + "=" * 40 + "\n"
+        relationships = schema_info.get("relationships", [])
+        if relationships:
+            # Group relationships by table
+            rel_by_table = {}
+            for rel in relationships:
+                from_table = rel.get('from_table')
+                if from_table not in rel_by_table:
+                    rel_by_table[from_table] = []
+                rel_by_table[from_table].append(rel)
+            
+            for table, rels in list(rel_by_table.items())[:10]:  # Show top 10 tables with relationships
+                context += f"{table}:\n"
+                for rel in rels[:3]:  # Show up to 3 relationships per table
+                    context += f"  → {rel['to_table']} via {rel['from_column']} = {rel['to_column']}\n"
+        
+        # Add ENUM definitions if available
+        if connection_id:
+            try:
+                enum_mappings = self._load_enum_mappings(int(connection_id))
+                if enum_mappings:
+                    context += "\n\nENUM DEFINITIONS:\n" + "=" * 40 + "\n"
+                    for enum_name, enum_values in enum_mappings.items():
+                        context += f"\n{enum_name.upper()}:\n"
+                        # Group by numeric value for clarity
+                        value_groups = {}
+                        for text, value in enum_values.items():
+                            if value not in value_groups:
+                                value_groups[value] = []
+                            value_groups[value].append(text)
+                        
+                        for value in sorted(value_groups.keys()):
+                            texts = value_groups[value]
+                            primary = texts[0]
+                            aliases = texts[1:] if len(texts) > 1 else []
+                            context += f"  {value} = {primary.upper()}"
+                            if aliases:
+                                context += f" (aliases: {', '.join(aliases)})"
+                            context += "\n"
+                    
+                    context += "\nENUM USAGE:\n"
+                    context += "- Use numeric values in SQL queries (e.g., Status = 3 for UNDER_REVIEW)\n"
+                    context += "- Text values in prompts map to numeric values automatically\n"
+                    context += "- Example: 'approved applications' translates to Status = 4\n"
+            except Exception as e:
+                logger.warning(f"Could not load enums for context: {e}")
+        
+        # Add semantic information if available
+        if semantic_analysis:
+            context += "\n\nCOLUMN SEMANTICS:\n" + "=" * 40 + "\n"
+            
+            # Add location column information
+            if semantic_analysis.get('location_columns'):
+                context += "\nLocation Columns (for city/region queries):\n"
+                for table, cols in list(semantic_analysis['location_columns'].items())[:5]:
+                    context += f"  {table}:\n"
+                    for col in cols[:3]:
+                        col_desc = f"    - {col['column']}"
+                        if col.get('is_postal'):
+                            col_desc += " (POSTAL ADDRESS)"
+                        elif col.get('is_physical'):
+                            col_desc += " (PHYSICAL ADDRESS)"
+                        if col.get('is_id'):
+                            col_desc += " -> references Cities.Id"
+                        context += col_desc + "\n"
+            
+            # Add temporal column information
+            if semantic_analysis.get('temporal_columns'):
+                context += "\nTemporal Columns (for date/time queries):\n"
+                for table, cols in list(semantic_analysis['temporal_columns'].items())[:5]:
+                    context += f"  {table}:\n"
+                    for col in cols[:3]:
+                        context += f"    - {col['column']} ({col['type']})\n"
+        
+        # Add SQL patterns and rules
+        context += "\n\nSQL PATTERNS & RULES:\n" + "=" * 40 + "\n"
         context += "- Always use WITH (NOLOCK) for SELECT queries\n"
+        context += "- Use proper JOINs based on foreign key relationships\n"
+        context += "- Consider indexes when ordering or filtering\n"
+        context += "- Primary keys are optimal for DISTINCT operations\n"
+        context += "- Table names are case-sensitive in some databases\n"
+        context += "- For enum columns, use numeric values (e.g., Status = 3, not Status = 'UNDER_REVIEW')\n"
+        context += "- For location queries: CityIdPhysical = physical address, CityIdPostal = mailing address\n"
+        context += "- JOIN with Cities table using appropriate city column for location-based queries\n"
         
         return context
     
@@ -164,22 +316,33 @@ class OptimizedRAGService:
         """Analyze schema to find relationships, indexes, and queryable patterns"""
         relationships = {}
         indexed_columns = {}
+        primary_keys = {}
+        unique_columns = {}
         numeric_columns = {}
         date_columns = {}
         text_columns = {}
+        boolean_columns = {}
         
         if not schema_info or "tables" not in schema_info:
             return {
                 "relationships": relationships,
                 "indexed_columns": indexed_columns,
+                "primary_keys": primary_keys,
+                "unique_columns": unique_columns,
                 "numeric_columns": numeric_columns,
                 "date_columns": date_columns,
-                "text_columns": text_columns
+                "text_columns": text_columns,
+                "boolean_columns": boolean_columns
             }
         
         tables = schema_info["tables"]
         
         for table_name, table_data in tables.items():
+            # Track primary keys - CRITICAL for accurate DISTINCT and JOIN operations
+            pks = table_data.get("primary_keys", [])
+            if pks:
+                primary_keys[table_name] = pks
+            
             # Analyze columns by type for smart query generation
             columns = table_data.get("columns", [])
             for col in columns:
@@ -187,22 +350,27 @@ class OptimizedRAGService:
                 col_type = col.get("data_type", "").lower()
                 
                 # Categorize columns by type
-                if any(t in col_type for t in ["int", "numeric", "decimal", "float", "money"]):
+                if any(t in col_type for t in ["int", "numeric", "decimal", "float", "money", "bigint", "smallint", "tinyint"]):
                     if table_name not in numeric_columns:
                         numeric_columns[table_name] = []
                     numeric_columns[table_name].append(col_name)
                 
-                elif any(t in col_type for t in ["date", "time"]):
+                elif any(t in col_type for t in ["date", "time", "datetime", "timestamp"]):
                     if table_name not in date_columns:
                         date_columns[table_name] = []
                     date_columns[table_name].append(col_name)
                 
-                elif any(t in col_type for t in ["char", "varchar", "text", "nchar", "nvarchar"]):
+                elif any(t in col_type for t in ["char", "varchar", "text", "nchar", "nvarchar", "ntext"]):
                     if table_name not in text_columns:
                         text_columns[table_name] = []
                     text_columns[table_name].append(col_name)
+                
+                elif any(t in col_type for t in ["bit", "bool", "boolean"]):
+                    if table_name not in boolean_columns:
+                        boolean_columns[table_name] = []
+                    boolean_columns[table_name].append(col_name)
             
-            # Analyze foreign key relationships
+            # Analyze foreign key relationships - ESSENTIAL for JOINs
             fks = table_data.get("foreign_keys", [])
             for fk in fks:
                 rel_key = f"{table_name}.{fk.get('column', '')}"
@@ -213,17 +381,28 @@ class OptimizedRAGService:
             indexes = table_data.get("indexes", [])
             for idx in indexes:
                 idx_columns = idx.get("columns", [])
+                is_unique = idx.get("unique", False)
+                
                 if idx_columns:
                     if table_name not in indexed_columns:
                         indexed_columns[table_name] = []
                     indexed_columns[table_name].extend(idx_columns)
+                    
+                    # Track unique indexes separately for DISTINCT optimization
+                    if is_unique:
+                        if table_name not in unique_columns:
+                            unique_columns[table_name] = []
+                        unique_columns[table_name].extend(idx_columns)
         
         return {
             "relationships": relationships,
             "indexed_columns": indexed_columns,
+            "primary_keys": primary_keys,
+            "unique_columns": unique_columns,
             "numeric_columns": numeric_columns,
             "date_columns": date_columns,
-            "text_columns": text_columns
+            "text_columns": text_columns,
+            "boolean_columns": boolean_columns
         }
 
     def _find_relationship_path(self, from_table: str, to_table: str, relationships: Dict[str, str]) -> Optional[str]:
@@ -256,8 +435,8 @@ class OptimizedRAGService:
         # Fallback: try common patterns like Id, StudentId, etc.
         return f"INNER JOIN {target_table} t2 WITH (NOLOCK) ON t1.Id = t2.{base_table}Id"
     
-    def _generate_dynamic_patterns(self, prompt_lower: str, schema_analysis: Dict[str, Any], original_prompt: str = None) -> Optional[str]:
-        """Generate dynamic SQL patterns based on schema analysis"""
+    def _generate_dynamic_patterns(self, prompt_lower: str, schema_analysis: Dict[str, Any], original_prompt: str = None, semantic_analysis: Dict[str, Any] = None) -> Optional[str]:
+        """Generate dynamic SQL patterns based on schema analysis and column semantics"""
         relationships = schema_analysis.get("relationships", {})
         numeric_columns = schema_analysis.get("numeric_columns", {})
         date_columns = schema_analysis.get("date_columns", {})
@@ -307,8 +486,37 @@ class OptimizedRAGService:
                 search_term = search_terms[0]
                 
                 # Special handling for city-based queries using normalized structure
-                if any(keyword in prompt_lower for keyword in ["from", "in"]) and any(loc in prompt_lower for loc in ["city", "location"]):
-                    # Check if we have Cities table relationship
+                if any(keyword in prompt_lower for keyword in ["from", "in"]) and any(loc in prompt_lower for loc in ["city", "location", "bayamon", "ponce", "san juan"]):
+                    # Enhanced: Use semantic analysis if available
+                    if semantic_analysis and 'location_columns' in semantic_analysis:
+                        location_cols = semantic_analysis.get('location_columns', {}).get('Students', [])
+                        city_cols = [col for col in location_cols if col['type'] == 'city' and col['is_id']]
+                        
+                        if city_cols:
+                            logger.info(f"🎯 Semantic city search: Students from {search_term}")
+                            # Determine which city column to use based on context
+                            if 'postal' in prompt_lower:
+                                preferred_cols = [col for col in city_cols if col['is_postal']]
+                            elif 'physical' in prompt_lower or 'fisico' in prompt_lower:
+                                preferred_cols = [col for col in city_cols if col['is_physical']]
+                            else:
+                                # Use both postal and physical
+                                preferred_cols = city_cols
+                            
+                            if preferred_cols:
+                                join_conditions = []
+                                where_conditions = []
+                                for i, col_info in enumerate(preferred_cols):
+                                    join_alias = f"c{i+1}"
+                                    join_conditions.append(f"LEFT JOIN Cities {join_alias} WITH (NOLOCK) ON s.{col_info['column']} = {join_alias}.Id")
+                                    where_conditions.append(f"{join_alias}.Name LIKE '%{search_term}%'")
+                                
+                                return f"""SELECT COUNT(DISTINCT s.Id) AS total 
+                                          FROM Students s WITH (NOLOCK) 
+                                          {' '.join(join_conditions)}
+                                          WHERE {' OR '.join(where_conditions)}"""
+                    
+                    # Fallback to relationship-based detection
                     city_relationships = []
                     for rel_key, rel_target in relationships.items():
                         if "Students" in rel_key and "Cities" in rel_target:
@@ -548,19 +756,31 @@ class OptimizedRAGService:
         return None
 
     def _pattern_match_sql(self, prompt: str, schema_info: Dict[str, Any], connection_id: int = 1) -> Optional[str]:
-        """Enhanced pattern matching with schema awareness"""
+        """Enhanced pattern matching with schema awareness and column intelligence"""
         prompt_lower = prompt.lower().strip()
         logger.info(f"🔍 Pattern matching called for: '{prompt}' (connection: {connection_id})")
         
         # Analyze schema for smart query generation
         schema_analysis = self._analyze_schema_relationships(schema_info)
         
+        # Use column intelligence if available
+        semantic_analysis = None
+        if self.column_intelligence and schema_info:
+            semantic_analysis = self.column_intelligence.analyze_column_semantics(schema_info)
+            
+            # Try location-aware query generation first
+            location_query = self.column_intelligence.generate_location_aware_query(
+                prompt, semantic_analysis, schema_info)
+            if location_query:
+                logger.info("🎯 Column Intelligence: Generated location-aware query")
+                return location_query
+        
         # Load dynamic enum mappings
         enum_mappings = self._load_enum_mappings(connection_id)
         status_mappings = enum_mappings.get("application_status", {})
         
         # Try dynamic patterns first (even with limited schema)
-        dynamic_result = self._generate_dynamic_patterns(prompt_lower, schema_analysis, prompt)
+        dynamic_result = self._generate_dynamic_patterns(prompt_lower, schema_analysis, prompt, semantic_analysis)
         if dynamic_result:
             return self._generate_index_optimized_query(dynamic_result, "Students", schema_analysis)
         
@@ -689,13 +909,7 @@ class OptimizedRAGService:
                               WHERE c1.Name LIKE '%{location}%' 
                                  OR c2.Name LIKE '%{location}%'"""
         
-        # Fallback dynamic patterns without schema dependency
-        fallback_result = self._generate_fallback_patterns(prompt_lower, prompt)
-        if fallback_result:
-            return fallback_result
-        
-        # Pattern: count students with family members (check this BEFORE generic count patterns)
-        # Handle typos like "familiy" and "then" instead of "than"
+        # HIGH PRIORITY: Family member patterns (must come before fallback patterns to avoid "member" conflicts)
         if ("count" in prompt_lower and "student" in prompt_lower and 
             any(word in prompt_lower for word in ["family", "familiy", "familymember"]) and 
             any(word in prompt_lower for word in ["member", "members"])):
@@ -703,9 +917,9 @@ class OptimizedRAGService:
             numbers = re.findall(r'\d+', prompt_lower)
             threshold = int(numbers[0]) if numbers else 1
             
-            # Check for "more than" or "greater than" or ">" or "then" (common typo for "than")
-            if any(phrase in prompt_lower for phrase in ["more than", "more then", "greater than", "greater then", ">", "over"]):
-                logger.info(f"🎯 Pattern matched: count students with more than {threshold} family members (using JOIN)")
+            # Check for "more than", "or more", "greater than" or ">" or "then" (common typo for "than")
+            if any(phrase in prompt_lower for phrase in ["more than", "more then", "or more", "or greater", "greater than", "greater then", ">", "over"]):
+                logger.info(f"🎯 HIGH PRIORITY Pattern: count students with more than {threshold} family members (using JOIN)")
                 return f"""SELECT COUNT(DISTINCT s.Id) AS total 
                           FROM Students s WITH (NOLOCK) 
                           INNER JOIN (
@@ -716,7 +930,7 @@ class OptimizedRAGService:
                           ) fm ON s.Id = fm.StudentId"""
             # Check for "less than" or "<"
             elif any(phrase in prompt_lower for phrase in ["less than", "less then", "<", "under", "fewer"]):
-                logger.info(f"🎯 Pattern matched: count students with less than {threshold} family members (using JOIN)")
+                logger.info(f"🎯 HIGH PRIORITY Pattern: count students with less than {threshold} family members (using JOIN)")
                 return f"""SELECT COUNT(DISTINCT s.Id) AS total 
                           FROM Students s WITH (NOLOCK) 
                           LEFT JOIN (
@@ -727,7 +941,7 @@ class OptimizedRAGService:
                           WHERE ISNULL(fm.family_count, 0) < {threshold}"""
             # Check for exact match or "with X" pattern
             else:
-                logger.info(f"🎯 Pattern matched: count students with exactly {threshold} family members (using JOIN)")
+                logger.info(f"🎯 HIGH PRIORITY Pattern: count students with exactly {threshold} family members (using JOIN)")
                 return f"""SELECT COUNT(DISTINCT s.Id) AS total 
                           FROM Students s WITH (NOLOCK) 
                           INNER JOIN (
@@ -736,6 +950,11 @@ class OptimizedRAGService:
                               GROUP BY StudentId 
                               HAVING COUNT(*) = {threshold}
                           ) fm ON s.Id = fm.StudentId"""
+        
+        # Fallback dynamic patterns without schema dependency
+        fallback_result = self._generate_fallback_patterns(prompt_lower, prompt)
+        if fallback_result:
+            return fallback_result
         
         # Pattern: count students by application status with totals
         if all(word in prompt_lower for word in ["count", "student"]) and ("status" in prompt_lower or "application" in prompt_lower) and any(word in prompt_lower for word in ["group", "by", "each", "breakdown", "total"]):
@@ -802,10 +1021,107 @@ ORDER BY GROUPING(sa.Status), sa.Status"""
                 return "SELECT TOP 100 * FROM Students WITH (NOLOCK)"
         
         
-        # Pattern: count total students (handle both singular and plural)
-        if "count" in prompt_lower and "student" in prompt_lower and "application" not in prompt_lower:
-            logger.info("🎯 Pattern matched: count total students")
-            return "SELECT COUNT(*) AS total FROM Students WITH (NOLOCK)"
+        # Check for StudentRecommendeds FIRST before generic detection
+        if "count" in prompt_lower and "student" in prompt_lower and ("recommended" in prompt_lower or "recommendeds" in prompt_lower):
+            logger.info("🎯 Pattern matched: count student recommendeds")
+            return "SELECT COUNT(*) AS total FROM StudentRecommendeds WITH (NOLOCK)"
+        
+        # Generic table count detection - check for table names in the prompt
+        if "count" in prompt_lower and schema_info and "tables" in schema_info:
+            # Check each table name against the prompt
+            for table_name in schema_info.get("tables", {}).keys():
+                table_lower = table_name.lower()
+                
+                # Create variations for matching
+                table_variations = []
+                
+                # Add exact lowercase match
+                table_variations.append(table_lower)
+                
+                # Add singular/plural variations
+                table_variations.append(table_lower.rstrip('s'))  # singular
+                table_variations.append(table_lower + 's')  # plural
+                
+                # Handle CamelCase table names by adding space-separated version
+                # e.g., "ScholarshipApplications" -> "scholarship applications"
+                camel_case_split = re.sub(r'([A-Z])', r' \1', table_name).strip().lower()
+                if ' ' in camel_case_split:  # Only add if it actually splits into multiple words
+                    table_variations.append(camel_case_split)
+                    # Also add singular version of the split
+                    table_variations.append(camel_case_split.rstrip('s'))
+                
+                # Also handle compound words without case changes
+                # e.g., "StudentRecommendeds" -> "student recommendeds"
+                if any(c.isupper() for c in table_name[1:]):  # Has internal uppercase letters
+                    # Try splitting on capital letters
+                    words = re.findall('[A-Z][a-z]*', table_name)
+                    if words:
+                        space_version = ' '.join(words).lower()
+                        table_variations.append(space_version)
+                        table_variations.append(space_version.rstrip('s'))
+                
+                # Remove duplicates while preserving order
+                seen = set()
+                unique_variations = []
+                for v in table_variations:
+                    if v not in seen and len(v) > 2:  # Avoid very short strings
+                        seen.add(v)
+                        unique_variations.append(v)
+                
+                for variation in unique_variations:
+                    if variation in prompt_lower:
+                        # Special case: StudentRecommendeds should match if "recommendeds" is mentioned
+                        if table_name == "StudentRecommendeds" and ("recommended" in prompt_lower or "recommendeds" in prompt_lower):
+                            logger.info(f"🎯 Generic pattern matched: count {table_name} (matched: '{variation}')")
+                            return f"SELECT COUNT(*) AS total FROM {table_name} WITH (NOLOCK)"
+                        
+                        # Don't match Students table unless ONLY "student" is mentioned (not "student recommended")
+                        if table_name == "Students":
+                            if "student" not in prompt_lower or "recommended" in prompt_lower:
+                                continue
+                        
+                        # For other tables, don't match if "student" is in the prompt but table isn't student-related
+                        if "student" in prompt_lower and not table_name.startswith("Student"):
+                            continue
+                        
+                        logger.info(f"🎯 Generic pattern matched: count {table_name} (matched: '{variation}')")
+                        return f"SELECT COUNT(*) AS total FROM {table_name} WITH (NOLOCK)"
+        
+        # Specific patterns for common tables (fallback if schema not available)
+        if "count" in prompt_lower:
+            if ("cities" in prompt_lower or "city" in prompt_lower) and "student" not in prompt_lower:
+                logger.info("🎯 Pattern matched: count cities")
+                return "SELECT COUNT(*) AS total FROM Cities WITH (NOLOCK)"
+            
+            if ("highschools" in prompt_lower or "high schools" in prompt_lower or "school" in prompt_lower) and "student" not in prompt_lower:
+                logger.info("🎯 Pattern matched: count highschools")
+                return "SELECT COUNT(*) AS total FROM HighSchools WITH (NOLOCK)"
+            
+            if ("regions" in prompt_lower or "region" in prompt_lower) and "student" not in prompt_lower:
+                logger.info("🎯 Pattern matched: count regions")
+                return "SELECT COUNT(*) AS total FROM Regions WITH (NOLOCK)"
+            
+            if ("occupation" in prompt_lower) and "student" not in prompt_lower:
+                logger.info("🎯 Pattern matched: count occupations")
+                return "SELECT COUNT(*) AS total FROM Occupations WITH (NOLOCK)"
+            
+            if ("municipio" in prompt_lower) and "student" not in prompt_lower:
+                logger.info("🎯 Pattern matched: count municipios")
+                return "SELECT COUNT(*) AS total FROM Municipios WITH (NOLOCK)"
+            
+            if ("family" in prompt_lower and "member" in prompt_lower) and "student" not in prompt_lower:
+                logger.info("🎯 Pattern matched: count family members")
+                return "SELECT COUNT(*) AS total FROM FamilyMembers WITH (NOLOCK)"
+            
+            # Check for StudentRecommendeds BEFORE checking for just Students
+            if "student" in prompt_lower and ("recommended" in prompt_lower or "recommendeds" in prompt_lower):
+                logger.info("🎯 Pattern matched: count student recommendeds")
+                return "SELECT COUNT(*) AS total FROM StudentRecommendeds WITH (NOLOCK)"
+            
+            # Only match Students if "student" is explicitly mentioned and not recommendeds
+            if "student" in prompt_lower and "application" not in prompt_lower and "recommended" not in prompt_lower:
+                logger.info("🎯 Pattern matched: count total students")
+                return "SELECT COUNT(*) AS total FROM Students WITH (NOLOCK)"
         
         return None
     
@@ -838,30 +1154,55 @@ ORDER BY GROUPING(sa.Status), sa.Status"""
             
             # Step 2: LLM generation with optimized prompt
             if not self.llm:
-                logger.warning("⚠️ OptimizedRAG: No LLM available, using basic fallback")
-                fallback_sql = "SELECT COUNT(*) AS total FROM Students WITH (NOLOCK)"
+                logger.warning("⚠️ OptimizedRAG: No LLM available, cannot generate SQL without pattern match")
                 metadata.update({
-                    "method": "fallback",
-                    "result_type": "table"
+                    "method": "no_llm_error",
+                    "error": "No LLM available and no pattern matched",
+                    "result_type": "error"
                 })
-                return fallback_sql, metadata
+                return None, metadata
             
-            # Build optimized context
+            # Build optimized context with connection_id for enum support
             context_start = time.time()
-            schema_context = self._build_optimized_schema_context(schema_info or {})
+            schema_context = self._build_optimized_schema_context(schema_info or {}, connection_id)
             context_time = time.time() - context_start
             
-            # Optimized prompt template
-            system_prompt = """You are an expert MSSQL query generator. Generate ONLY the SQL query, no explanations.
+            # Enhanced prompt template using full metadata
+            system_prompt = """You are an expert MSSQL query generator with full database schema knowledge.
 
-Rules:
-- For "count X with Y": use INNER JOIN and COUNT DISTINCT
-- Always add WITH (NOLOCK) for SELECT queries  
-- Use proper MSSQL syntax
+CRITICAL RULES:
+1. Generate ONLY the SQL query - no explanations or markdown
+2. Use the EXACT table and column names from the schema
+3. Use proper JOINs based on the foreign key relationships provided
+4. Always add WITH (NOLOCK) for SELECT queries
+5. Use indexes when available for better performance
+6. Primary keys are optimal for DISTINCT operations
+7. For ENUM columns, ALWAYS use numeric values (e.g., Status = 3), NEVER string values
+
+IMPORTANT PATTERNS:
+- "count X" → SELECT COUNT(*) FROM X WITH (NOLOCK)
+- "count X with Y" → JOIN tables using foreign keys, COUNT DISTINCT on primary key
+- "show X with Y" → SELECT with JOIN using foreign key relationships
+- "X by Y" → GROUP BY Y column
+- "active X" → WHERE IsActive = 1 (check for IsActive column)
+
+LOCATION QUERIES:
+- "students from [city]" → JOIN Students with Cities table using CityIdPhysical or CityIdPostal
+- Use CityIdPhysical for physical location queries
+- Use CityIdPostal for mailing address queries
+- When location type not specified, check both CityIdPhysical and CityIdPostal
+- Cities are normalized - always JOIN with Cities table to get city names
+
+COLUMN UNDERSTANDING:
+- Pay attention to column semantics in the schema
+- Location columns ending in "Physical" refer to where someone lives
+- Location columns ending in "Postal" refer to mailing address
+- Columns with "Id" suffix usually reference other tables
+- Use semantic information to understand what columns mean
 
 {schema_context}
 
-Query request: {prompt}
+Generate SQL for: {prompt}
 
 SQL:"""
             
@@ -903,15 +1244,14 @@ SQL:"""
             error_time = time.time() - start_time
             logger.error(f"❌ OptimizedRAG: Error after {error_time*1000:.2f}ms: {str(e)}")
             
-            # Fallback on error
-            fallback_sql = "SELECT COUNT(*) AS total FROM Students WITH (NOLOCK)"
+            # Return error instead of defaulting to Students
             metadata.update({
-                "method": "error_fallback",
+                "method": "error",
                 "error": str(e),
                 "error_time": f"{error_time*1000:.2f}ms",
-                "result_type": "table"
+                "result_type": "error"
             })
-            return fallback_sql, metadata
+            return None, metadata
     
     def log_performance_metrics(self, operation: str, duration_ms: float, metadata: Dict[str, Any]):
         """Log detailed performance metrics"""

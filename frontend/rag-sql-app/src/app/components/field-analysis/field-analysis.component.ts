@@ -8,24 +8,29 @@ import { ToastrService } from 'ngx-toastr';
   standalone: true,
   imports: [CommonModule],
   template: `
-    <div class="bg-white rounded-lg shadow-md border border-gray-200">
-      <div class="p-4 border-b border-gray-200">
-        <h3 class="text-lg font-semibold text-gray-900 flex items-center gap-2">
-          🏷️ Database Field Analysis
+    <div class="bg-white rounded-xl shadow-lg border border-gray-100 overflow-hidden">
+      <!-- Header -->
+      <div class="bg-gradient-to-r from-cyan-600 to-blue-600 px-3 py-2">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"></path>
+            </svg>
+            <h3 class="text-sm font-semibold text-white">Field Analysis</h3>
+          </div>
           <button 
             (click)="refreshAnalysis()"
             [disabled]="isLoading"
-            class="text-sm bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-600 disabled:opacity-50">
+            class="bg-white/20 text-white px-2 py-0.5 rounded text-xs hover:bg-white/30 disabled:opacity-50">
             {{ isLoading ? 'Loading...' : 'Refresh' }}
           </button>
-        </h3>
-        <p class="text-sm text-gray-600 mt-1">Semantic insights about available data and query capabilities</p>
+        </div>
       </div>
       
-      <div class="p-4" *ngIf="!isLoading && analysis">
+      <div class="p-3" *ngIf="!isLoading && analysis">
         <!-- Entity Overview -->
-        <div *ngIf="hasEntities()" class="mb-6">
-          <h4 class="text-md font-semibold text-gray-800 mb-3">📊 Available Entities</h4>
+        <div *ngIf="hasEntities()" class="mb-4">
+          <h4 class="text-sm font-semibold text-gray-700 mb-2">Available Entities</h4>
           <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
             <div *ngFor="let entity of getEntityList()" 
                  class="border border-gray-200 rounded-lg p-3 bg-gray-50">
@@ -41,8 +46,8 @@ import { ToastrService } from 'ngx-toastr';
         </div>
         
         <!-- Data Domains -->
-        <div *ngIf="hasDataDomains()" class="mb-6">
-          <h4 class="text-md font-semibold text-gray-800 mb-3">🏷️ Data Categories</h4>
+        <div *ngIf="hasDataDomains()" class="mb-4">
+          <h4 class="text-sm font-semibold text-gray-700 mb-2">Data Categories</h4>
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div *ngFor="let domain of getDataDomains()" 
                  class="border border-gray-200 rounded-lg p-3">
@@ -59,8 +64,8 @@ import { ToastrService } from 'ngx-toastr';
         </div>
         
         <!-- Query Suggestions -->
-        <div *ngIf="hasQuerySuggestions()" class="mb-6">
-          <h4 class="text-md font-semibold text-gray-800 mb-3">💡 Query Suggestions</h4>
+        <div *ngIf="hasQuerySuggestions()" class="mb-4">
+          <h4 class="text-sm font-semibold text-gray-700 mb-2">Query Suggestions</h4>
           <div class="space-y-2">
             <div *ngFor="let suggestion of getQuerySuggestions()" 
                  class="border border-gray-200 rounded-lg p-3 bg-blue-50">
@@ -83,8 +88,8 @@ import { ToastrService } from 'ngx-toastr';
         </div>
         
         <!-- Missing Fields -->
-        <div *ngIf="hasMissingFields()" class="mb-6">
-          <h4 class="text-md font-semibold text-gray-800 mb-3">⚠️ Potential Limitations</h4>
+        <div *ngIf="hasMissingFields()" class="mb-4">
+          <h4 class="text-sm font-semibold text-gray-700 mb-2">Potential Limitations</h4>
           <div class="space-y-3">
             <div *ngFor="let missing of getMissingFields()" 
                  class="border border-orange-200 rounded-lg p-3 bg-orange-50">
@@ -104,22 +109,22 @@ import { ToastrService } from 'ngx-toastr';
         
         <!-- Database Statistics -->
         <div class="bg-gray-50 rounded-lg p-3">
-          <h4 class="text-md font-semibold text-gray-800 mb-2">📈 Database Statistics</h4>
-          <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+          <h4 class="text-sm font-semibold text-gray-700 mb-2">Database Statistics</h4>
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-center">
             <div>
-              <div class="text-2xl font-bold text-blue-600">{{ getTotalTables() }}</div>
+              <div class="text-xl font-bold text-blue-600">{{ getTotalTables() }}</div>
               <div class="text-xs text-gray-600">Total Tables</div>
             </div>
             <div>
-              <div class="text-2xl font-bold text-green-600">{{ getTotalFields() }}</div>
+              <div class="text-xl font-bold text-green-600">{{ getTotalFields() }}</div>
               <div class="text-xs text-gray-600">Total Fields</div>
             </div>
             <div>
-              <div class="text-2xl font-bold text-purple-600">{{ getTotalRelationships() }}</div>
+              <div class="text-xl font-bold text-purple-600">{{ getTotalRelationships() }}</div>
               <div class="text-xs text-gray-600">Relationships</div>
             </div>
             <div>
-              <div class="text-2xl font-bold text-orange-600">{{ getDataCategories() }}</div>
+              <div class="text-xl font-bold text-orange-600">{{ getDataCategories() }}</div>
               <div class="text-xs text-gray-600">Data Categories</div>
             </div>
           </div>

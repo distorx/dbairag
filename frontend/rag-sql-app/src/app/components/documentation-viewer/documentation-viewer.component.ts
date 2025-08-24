@@ -77,36 +77,40 @@ interface ProcedureInfo {
   standalone: true,
   imports: [CommonModule, FormsModule],
   template: `
-    <div class="bg-white rounded-lg shadow-md p-6">
-      <div class="flex justify-between items-center mb-4">
-        <h2 class="text-2xl font-bold">Database Documentation</h2>
-        <div class="flex gap-2">
-          <button
-            (click)="toggleView()"
-            class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">
-            {{ viewMode === 'visual' ? 'Markdown View' : 'Visual View' }}
-          </button>
-          <button
-            (click)="refreshDocumentation()"
-            [disabled]="loading"
-            class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 disabled:opacity-50 relative">
-            <span *ngIf="!loading">🔄 Refresh</span>
-            <span *ngIf="loading" class="flex items-center">
-              <svg class="animate-spin h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24">
-                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-              </svg>
-              Refreshing...
-            </span>
-          </button>
-          <button
-            (click)="downloadDocumentation()"
-            [disabled]="!documentation"
-            class="bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600 disabled:opacity-50">
-            Download MD
-          </button>
+    <div class="bg-white rounded-xl shadow-lg border border-gray-100 overflow-hidden">
+      <!-- Header -->
+      <div class="bg-gradient-to-r from-indigo-600 to-purple-600 px-3 py-2">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+            </svg>
+            <h3 class="text-sm font-semibold text-white">Database Documentation</h3>
+          </div>
+          <div class="flex gap-2">
+            <button
+              (click)="toggleView()"
+              class="bg-white/20 text-white px-2 py-0.5 rounded text-xs hover:bg-white/30">
+              {{ viewMode === 'visual' ? 'Markdown' : 'Visual' }}
+            </button>
+            <button
+              (click)="refreshDocumentation()"
+              [disabled]="loading"
+              class="bg-white/20 text-white px-2 py-0.5 rounded text-xs hover:bg-white/30 disabled:opacity-50">
+              <span *ngIf="!loading">Refresh</span>
+              <span *ngIf="loading">Loading...</span>
+            </button>
+            <button
+              (click)="downloadDocumentation()"
+              [disabled]="!documentation"
+              class="bg-white/20 text-white px-2 py-0.5 rounded text-xs hover:bg-white/30 disabled:opacity-50">
+              Download
+            </button>
+          </div>
         </div>
       </div>
+      
+      <div class="p-3">
       
       <!-- Loading State -->
       <div *ngIf="loading" class="text-center py-8">
@@ -119,39 +123,39 @@ interface ProcedureInfo {
       </div>
       
       <!-- Error State -->
-      <div *ngIf="error" class="bg-red-50 border border-red-200 rounded p-4 text-red-800">
+      <div *ngIf="error" class="bg-gray-50 border border-gray-200 rounded p-3 text-gray-800 text-sm">
         {{ error }}
       </div>
       
       <!-- Visual View -->
-      <div *ngIf="!loading && !error && documentation && viewMode === 'visual'" class="space-y-6">
+      <div *ngIf="!loading && !error && documentation && viewMode === 'visual'" class="space-y-4">
         <!-- Statistics -->
-        <div class="bg-gray-50 rounded-lg p-4">
-          <h3 class="text-lg font-semibold mb-3">Database Statistics</h3>
-          <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+        <div class="bg-gray-50 rounded-lg p-3">
+          <h3 class="text-sm font-semibold mb-2 text-gray-700">Database Statistics</h3>
+          <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
             <div class="text-center">
-              <div class="text-2xl font-bold text-blue-600">{{ documentation.statistics.total_tables }}</div>
-              <div class="text-sm text-gray-600">Tables</div>
+              <div class="text-xl font-bold text-blue-600">{{ documentation.statistics.total_tables }}</div>
+              <div class="text-xs text-gray-600">Tables</div>
             </div>
             <div class="text-center">
-              <div class="text-2xl font-bold text-green-600">{{ documentation.statistics.total_columns }}</div>
-              <div class="text-sm text-gray-600">Columns</div>
+              <div class="text-xl font-bold text-green-600">{{ documentation.statistics.total_columns }}</div>
+              <div class="text-xs text-gray-600">Columns</div>
             </div>
             <div class="text-center">
-              <div class="text-2xl font-bold text-purple-600">{{ documentation.statistics.total_relationships }}</div>
-              <div class="text-sm text-gray-600">Relationships</div>
+              <div class="text-xl font-bold text-purple-600">{{ documentation.statistics.total_relationships }}</div>
+              <div class="text-xs text-gray-600">Relationships</div>
             </div>
             <div class="text-center">
-              <div class="text-2xl font-bold text-orange-600">{{ documentation.statistics.total_views }}</div>
-              <div class="text-sm text-gray-600">Views</div>
+              <div class="text-xl font-bold text-orange-600">{{ documentation.statistics.total_views }}</div>
+              <div class="text-xs text-gray-600">Views</div>
             </div>
             <div class="text-center">
-              <div class="text-2xl font-bold text-red-600">{{ documentation.statistics.total_stored_procedures }}</div>
-              <div class="text-sm text-gray-600">Procedures</div>
+              <div class="text-xl font-bold text-gray-600">{{ documentation.statistics.total_stored_procedures }}</div>
+              <div class="text-xs text-gray-600">Procedures</div>
             </div>
             <div class="text-center">
-              <div class="text-2xl font-bold text-indigo-600">{{ documentation.statistics.total_rows | number }}</div>
-              <div class="text-sm text-gray-600">Total Rows</div>
+              <div class="text-xl font-bold text-indigo-600">{{ documentation.statistics.total_rows | number }}</div>
+              <div class="text-xs text-gray-600">Total Rows</div>
             </div>
           </div>
         </div>
@@ -288,6 +292,7 @@ interface ProcedureInfo {
       <div *ngIf="!loading && !error && markdownContent && viewMode === 'markdown'" 
            class="prose prose-sm max-w-none markdown-content"
            [innerHTML]="renderedMarkdown">
+      </div>
       </div>
     </div>
   `,

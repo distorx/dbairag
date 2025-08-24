@@ -30,6 +30,8 @@ from ..services.documentation_service import documentation_service
 from ..services.retry_service import RetryService, RetryConfig, QueryRetryWrapper
 from ..services.queries_service import get_comprehensive_context, refresh_all_metadata
 from ..services.schema_sync_service import SchemaSyncService
+from ..services.query_suggestions_service import QuerySuggestionsService
+from ..services.hints_storage_service import hints_storage
 from ..utils.json_utils import safe_json_dumps
 
 router = APIRouter(prefix="/api/queries", tags=["queries"])
@@ -217,6 +219,18 @@ async def execute_query_optimized(
         )
         
         logger.info(f"✅ OPTIMIZED: Real query completed in {total_time}ms with {query_result.get('row_count', 0)} rows")
+        
+        # Save successful query pattern to MongoDB for learning
+        try:
+            await hints_storage.save_successful_query(
+                prompt=request.prompt,
+                sql_query=sql_query,
+                connection_id=str(connection.id),
+                execution_time_ms=total_time,
+                result_count=query_result.get("row_count", 0)
+            )
+        except Exception as e:
+            logger.warning(f"Failed to save query hint: {e}")
         
         return QueryResponse(
             prompt=request.prompt,
@@ -823,7 +837,7 @@ async def get_query_suggestions(
     connection_id: int,
     db: AsyncSession = Depends(get_db)
 ):
-    """Get query suggestions based on database schema"""
+    """Get enhanced query suggestions with 200+ advanced SQL patterns"""
     
     # Get connection
     result = await db.execute(
@@ -861,10 +875,15 @@ async def get_query_suggestions(
             force_refresh=False
         )
         
-        # Build suggestions
-        tables = list(schema_info.get("tables", {}).keys())
+        # Get all 200+ complex query templates
+        suggestions_service = QuerySuggestionsService()
+        all_templates = suggestions_service.get_complex_query_templates(schema_info)
         
-        # Find numeric and filterable columns
+        # Get categorized suggestions for better organization
+        categorized = suggestions_service.get_categorized_suggestions(schema_info)
+        
+        # Build aggregation and filter columns for backward compatibility
+        tables = list(schema_info.get("tables", {}).keys())
         aggregation_columns = {}
         filter_columns = {}
         
@@ -888,72 +907,70 @@ async def get_query_suggestions(
             if filterable_cols:
                 filter_columns[table_name] = filterable_cols
         
-        # Create common query templates
-        common_queries = []
-        
-        if tables:
-            # Basic templates for the first table (or most important one)
-            main_table = tables[0] if tables else "table_name"
+        # Get learned patterns from MongoDB
+        learned_hints = []
+        try:
+            learned_patterns = await hints_storage.get_learned_hints(
+                connection_id=str(connection_id),
+                limit=30
+            )
             
-            common_queries.extend([
-                QueryTemplate(
-                    name="Count All Records",
-                    description=f"Count total records in a table",
-                    query_type=QueryType.COUNT,
-                    template=f"SELECT COUNT(*) FROM {main_table}",
+            # Convert learned patterns to QueryTemplate format
+            for pattern in learned_patterns:
+                learned_hints.append(QueryTemplate(
+                    name=f"📚 {pattern['name']}",  # Prefix with book emoji to indicate learned
+                    description=f"Used {pattern['usage_count']} times | {pattern['category']}",
+                    query_type=QueryType.SELECT,  # Default type
+                    template=pattern['template'],
                     parameters=[]
-                ),
-                QueryTemplate(
-                    name="Select Top Records",
-                    description="Get first N records from a table",
-                    query_type=QueryType.SELECT,
-                    template=f"SELECT TOP 10 * FROM {main_table}",
-                    parameters=[]
-                ),
-                QueryTemplate(
-                    name="Search by Value",
-                    description="Find records containing specific value",
-                    query_type=QueryType.SELECT,
-                    template=f"SELECT * FROM {main_table} WHERE column_name LIKE '%value%'",
-                    parameters=["column_name", "value"]
-                ),
-            ])
+                ))
             
-            # Add aggregation templates if numeric columns exist
-            if aggregation_columns.get(main_table):
-                numeric_col = aggregation_columns[main_table][0]
-                common_queries.extend([
-                    QueryTemplate(
-                        name="Calculate Average",
-                        description="Calculate average of numeric column",
-                        query_type=QueryType.AGGREGATE,
-                        template=f"SELECT AVG({numeric_col}) FROM {main_table}",
-                        parameters=[]
-                    ),
-                    QueryTemplate(
-                        name="Calculate Sum",
-                        description="Calculate sum of numeric column",
-                        query_type=QueryType.AGGREGATE,
-                        template=f"SELECT SUM({numeric_col}) FROM {main_table}",
-                        parameters=[]
-                    ),
-                    QueryTemplate(
-                        name="Find Maximum",
-                        description="Find maximum value in column",
-                        query_type=QueryType.AGGREGATE,
-                        template=f"SELECT MAX({numeric_col}) FROM {main_table}",
-                        parameters=[]
-                    ),
-                ])
+            logger.info(f"📚 Added {len(learned_hints)} learned patterns to suggestions")
+        except Exception as e:
+            logger.warning(f"Could not fetch learned hints: {e}")
         
+        # Combine static templates with learned patterns
+        combined_templates = all_templates + learned_hints
+        
+        # Return enhanced suggestions with all patterns
         suggestions = QuerySuggestions(
             tables=tables,
-            common_queries=common_queries,
+            common_queries=combined_templates,  # Static + learned templates
             aggregation_columns=aggregation_columns,
             filter_columns=filter_columns
         )
         
-        return suggestions
+        # Add categorized field for frontend that supports it
+        suggestions_dict = suggestions.dict()
+        suggestions_dict["categorized"] = {
+            category: [template.dict() for template in templates]
+            for category, templates in categorized.items()
+        }
+        
+        # Add learned patterns as a separate category
+        if learned_hints:
+            suggestions_dict["categorized"]["Learned Patterns"] = [
+                template.dict() for template in learned_hints
+            ]
+        
+        suggestions_dict["total_templates"] = len(combined_templates)
+        suggestions_dict["learned_count"] = len(learned_hints)
+        
+        # Add popular patterns
+        try:
+            popular = await hints_storage.get_popular_patterns(limit=10)
+            suggestions_dict["popular_patterns"] = popular
+        except:
+            suggestions_dict["popular_patterns"] = []
+        
+        # Add category statistics
+        try:
+            stats = await hints_storage.get_category_statistics()
+            suggestions_dict["category_stats"] = stats
+        except:
+            suggestions_dict["category_stats"] = {}
+        
+        return suggestions_dict
         
     except Exception as e:
         raise HTTPException(
@@ -1499,3 +1516,84 @@ async def get_schema_cache_stats():
             "error": str(e),
             "timestamp": time.time()
         }
+
+@router.get("/hints/learned/{connection_id}")
+async def get_learned_hints(
+    connection_id: int,
+    category: Optional[str] = None,
+    limit: int = 50
+):
+    """Get learned query hints from MongoDB"""
+    try:
+        hints = await hints_storage.get_learned_hints(
+            connection_id=str(connection_id),
+            category=category,
+            limit=limit
+        )
+        return {
+            "hints": hints,
+            "count": len(hints)
+        }
+    except Exception as e:
+        logger.error(f"Error fetching learned hints: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch learned hints: {str(e)}"
+        )
+
+@router.get("/hints/popular")
+async def get_popular_hints(limit: int = 20):
+    """Get most popular query patterns across all connections"""
+    try:
+        patterns = await hints_storage.get_popular_patterns(limit=limit)
+        return {
+            "patterns": patterns,
+            "count": len(patterns)
+        }
+    except Exception as e:
+        logger.error(f"Error fetching popular patterns: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch popular patterns: {str(e)}"
+        )
+
+@router.get("/hints/search")
+async def search_hints(q: str, limit: int = 20):
+    """Search for hints based on keywords"""
+    try:
+        if not q or len(q) < 2:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Search query must be at least 2 characters"
+            )
+        
+        hints = await hints_storage.search_hints(q, limit=limit)
+        return {
+            "query": q,
+            "hints": hints,
+            "count": len(hints)
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error searching hints: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to search hints: {str(e)}"
+        )
+
+@router.get("/hints/statistics")
+async def get_hints_statistics():
+    """Get statistics about learned query patterns"""
+    try:
+        stats = await hints_storage.get_category_statistics()
+        return {
+            "category_statistics": stats,
+            "timestamp": time.time()
+        }
+    except Exception as e:
+        logger.error(f"Error fetching hints statistics: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch statistics: {str(e)}"
+        )

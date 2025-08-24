@@ -1,6 +1,7 @@
 import { Injectable } from '@angular/core';
 import { BehaviorSubject } from 'rxjs';
 import { v4 as uuidv4 } from 'uuid';
+import { StorageService } from './storage.service';
 
 export interface Cell {
   id: string;
@@ -27,7 +28,7 @@ export interface NotebookSession {
 export class NotebookService {
   private currentSession$ = new BehaviorSubject<NotebookSession | null>(null);
   
-  constructor() {
+  constructor(private storageService: StorageService) {
     this.initializeSession();
   }
 
@@ -94,13 +95,25 @@ export class NotebookService {
     if (this.currentSession) {
       // Find the prompt cell and add response after it
       const promptIndex = this.currentSession.cells.findIndex(c => c.id === promptCellId);
+      let promptContent = '';
+      
       if (promptIndex !== -1) {
+        promptContent = this.currentSession.cells[promptIndex].content;
         this.currentSession.cells.splice(promptIndex + 1, 0, cell);
       } else {
         this.currentSession.cells.push(cell);
       }
       this.currentSession.updated_at = new Date();
       this.currentSession$.next(this.currentSession);
+      
+      // Save query history if it's a successful query
+      if (this.currentSession.connection_id && result_type !== 'error' && promptContent) {
+        this.storageService.saveQueryHistory(
+          this.currentSession.connection_id,
+          promptContent,
+          result_data
+        );
+      }
     }
     
     return cell;
