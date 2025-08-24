@@ -11,3 +11,41 @@ body {
   color: var(--color-gray-900);
   line-height: var(--leading-normal);
 }
+
+/* AG-Grid Custom Styles for Better Column Sizing */
+.ag-theme-quartz {
+  /* Prevent columns from unnecessarily expanding */
+  --ag-grid-size: 8px;
+}
+
+.ag-theme-quartz .ag-root-wrapper {
+  border: 1px solid #e5e7eb;
+  border-radius: 0.5rem;
+}
+
+.ag-theme-quartz .ag-header-cell {
+  font-weight: 600;
+  font-size: 0.875rem;
+}
+
+.ag-theme-quartz .ag-cell {
+  font-size: 0.875rem;
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+}
+
+/* Ensure horizontal scrolling when content exceeds container */
+.ag-theme-quartz .ag-body-horizontal-scroll {
+  overflow-x: auto !important;
+}
+
+/* Don't force columns to fill available width */
+.ag-theme-quartz .ag-center-cols-viewport {
+  min-width: auto !important;
+}
+
+.ag-theme-quartz .ag-center-cols-container {
+  width: auto !important;
+  min-width: auto !important;
+}

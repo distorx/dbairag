@@ -3,6 +3,7 @@ import logging
 import json
 import os
 import re
+import unicodedata
 from typing import Optional, Dict, Any, Tuple
 from functools import lru_cache
 from langchain_openai import ChatOpenAI
@@ -52,6 +53,31 @@ class OptimizedRAGService:
             logger.info("✅ OptimizedRAGService: Column Intelligence Service initialized")
         except ImportError:
             logger.warning("⚠️ OptimizedRAGService: Column Intelligence Service not available")
+    
+    def _normalize_for_comparison(self, text: str) -> str:
+        """Normalize text by removing accents for comparison"""
+        # Convert to NFD (decomposed) form and filter out combining characters
+        nfd = unicodedata.normalize('NFD', text)
+        without_accents = ''.join(char for char in nfd if unicodedata.category(char) != 'Mn')
+        return without_accents.lower()
+    
+    def _create_accent_insensitive_pattern(self, city_name: str) -> str:
+        """Create a SQL pattern that matches both accented and non-accented versions"""
+        # Common accent replacements for Puerto Rican cities
+        replacements = {
+            'a': '[aáà]',
+            'e': '[eéè]',
+            'i': '[iíì]',
+            'o': '[oóò]',
+            'u': '[uúù]',
+            'n': '[nñ]'
+        }
+        
+        pattern = city_name.lower()
+        for char, replacement in replacements.items():
+            pattern = pattern.replace(char, replacement)
+        
+        return pattern
         
         if settings.openai_api_key and settings.openai_api_key.startswith("sk-"):
             try:
@@ -511,10 +537,16 @@ class OptimizedRAGService:
                                     join_conditions.append(f"LEFT JOIN Cities {join_alias} WITH (NOLOCK) ON s.{col_info['column']} = {join_alias}.Id")
                                     where_conditions.append(f"{join_alias}.Name LIKE '%{search_term}%'")
                                 
+                                # Update where conditions to use COLLATE for accent-insensitive matching
+                                where_conditions_ai = []
+                                for i, col_info in enumerate(preferred_cols):
+                                    join_alias = f"c{i+1}"
+                                    where_conditions_ai.append(f"{join_alias}.Name COLLATE Latin1_General_CI_AI LIKE '%{search_term}%'")
+                                
                                 return f"""SELECT COUNT(DISTINCT s.Id) AS total 
                                           FROM Students s WITH (NOLOCK) 
                                           {' '.join(join_conditions)}
-                                          WHERE {' OR '.join(where_conditions)}"""
+                                          WHERE {' OR '.join(where_conditions_ai)}"""
                     
                     # Fallback to relationship-based detection
                     city_relationships = []
@@ -532,10 +564,16 @@ class OptimizedRAGService:
                             join_conditions.append(f"LEFT JOIN Cities {join_alias} WITH (NOLOCK) ON s.{city_col} = {join_alias}.Id")
                             where_conditions.append(f"{join_alias}.Name LIKE '%{search_term}%'")
                         
+                        # Update where conditions to use COLLATE for accent-insensitive matching
+                        where_conditions_ai = []
+                        for i, city_col in enumerate(city_relationships):
+                            join_alias = f"c{i+1}"
+                            where_conditions_ai.append(f"{join_alias}.Name COLLATE Latin1_General_CI_AI LIKE '%{search_term}%'")
+                        
                         return f"""SELECT COUNT(DISTINCT s.Id) AS total 
                                   FROM Students s WITH (NOLOCK) 
                                   {' '.join(join_conditions)}
-                                  WHERE {' OR '.join(where_conditions)}"""
+                                  WHERE {' OR '.join(where_conditions_ai)}"""
                 
                 # Regular text search for other columns
                 if "Students" in text_columns:
@@ -662,14 +700,15 @@ class OptimizedRAGService:
                 location = search_terms[0]
                 logger.info(f"🎯 Fallback pattern: Students from {location} (normalized)")
                 
-                # Handle normalized Cities table structure
+                # Handle normalized Cities table structure with accent-insensitive matching
                 # Students can be linked via CityIdPhysical or CityIdPostal
+                # Using COLLATE Latin1_General_CI_AI for accent-insensitive comparison
                 return f"""SELECT COUNT(DISTINCT s.Id) AS total 
                           FROM Students s WITH (NOLOCK) 
                           LEFT JOIN Cities c1 WITH (NOLOCK) ON s.CityIdPhysical = c1.Id 
                           LEFT JOIN Cities c2 WITH (NOLOCK) ON s.CityIdPostal = c2.Id 
-                          WHERE c1.Name LIKE '%{location}%' 
-                             OR c2.Name LIKE '%{location}%'"""
+                          WHERE c1.Name COLLATE Latin1_General_CI_AI LIKE '%{location}%' 
+                             OR c2.Name COLLATE Latin1_General_CI_AI LIKE '%{location}%'"""
         
         # Pattern: Name-based queries
         if "student" in prompt_lower and any(name_op in prompt_lower for name_op in ["named", "called", "name"]):
@@ -899,15 +938,16 @@ class OptimizedRAGService:
                 
                 if city_words:
                     location = ' '.join(city_words)
-                    logger.info(f"🎯 Priority pattern: Students from {location} (normalized Cities table)")
+                    logger.info(f"🎯 Priority pattern: Students from {location} (normalized Cities table with accent-insensitive)")
                     
                     # Use normalized Cities table with both physical and postal addresses
+                    # Using COLLATE for accent-insensitive comparison (handles Bayamón, San Sebastián, etc.)
                     return f"""SELECT COUNT(DISTINCT s.Id) AS total 
                               FROM Students s WITH (NOLOCK) 
                               LEFT JOIN Cities c1 WITH (NOLOCK) ON s.CityIdPhysical = c1.Id 
                               LEFT JOIN Cities c2 WITH (NOLOCK) ON s.CityIdPostal = c2.Id 
-                              WHERE c1.Name LIKE '%{location}%' 
-                                 OR c2.Name LIKE '%{location}%'"""
+                              WHERE c1.Name COLLATE Latin1_General_CI_AI LIKE '%{location}%' 
+                                 OR c2.Name COLLATE Latin1_General_CI_AI LIKE '%{location}%'"""
         
         # HIGH PRIORITY: Family member patterns (must come before fallback patterns to avoid "member" conflicts)
         if ("count" in prompt_lower and "student" in prompt_lower and 

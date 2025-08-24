@@ -269,7 +269,7 @@ class ColumnIntelligenceService:
                     return f"""SELECT COUNT(DISTINCT s.Id) AS total
                              FROM Students s WITH (NOLOCK)
                              INNER JOIN Cities c WITH (NOLOCK) ON s.{city_col['column']} = c.Id
-                             WHERE c.Name LIKE '%{location}%'"""
+                             WHERE c.Name COLLATE Latin1_General_CI_AI LIKE '%{location}%'"""
                 
                 elif any(action in prompt_lower for action in ['show', 'list', 'find', 'get']):
                     # Extract limit if specified
@@ -280,7 +280,7 @@ class ColumnIntelligenceService:
                     return f"""SELECT TOP {limit} s.*, c.Name AS CityName
                              FROM Students s WITH (NOLOCK)
                              INNER JOIN Cities c WITH (NOLOCK) ON s.{city_col['column']} = c.Id
-                             WHERE c.Name LIKE '%{location}%'"""
+                             WHERE c.Name COLLATE Latin1_General_CI_AI LIKE '%{location}%'"""
                 
                 elif 'group' in prompt_lower or 'by city' in prompt_lower:
                     logger.info(f"🎯 Location-aware query: Group students by city")

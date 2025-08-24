@@ -285,7 +285,8 @@ ModuleRegistry.registerModules([AllCommunityModule]);
               
               <!-- AG-Grid Table -->
               <ag-grid-angular
-                style="width: 100%; height: 500px;"
+                style="width: 100%; height: 500px; overflow-x: auto;"
+                class="ag-theme-quartz"
                 [rowData]="cell.result_data.data"
                 [columnDefs]="columnDefs"
                 [defaultColDef]="defaultColDef"
@@ -328,8 +329,11 @@ export class NotebookCellComponent implements OnChanges, OnInit {
     sortable: true,
     filter: true,
     resizable: true,
-    minWidth: 100,
-    floatingFilter: false
+    minWidth: 80,
+    maxWidth: 500,
+    floatingFilter: false,
+    wrapText: false,
+    autoHeight: false
   };
   gridOptions: GridOptions = {
     theme: themeQuartz,
@@ -347,7 +351,12 @@ export class NotebookCellComponent implements OnChanges, OnInit {
     suppressMenuHide: true,
     domLayout: 'normal',
     rowHeight: 40,
-    headerHeight: 45
+    headerHeight: 45,
+    autoSizeStrategy: {
+      type: 'fitCellContents',
+      defaultMinWidth: 80,
+      defaultMaxWidth: 400
+    }
   };
   private gridApi!: GridApi;
   
@@ -371,15 +380,36 @@ export class NotebookCellComponent implements OnChanges, OnInit {
       
       // Set up AG-Grid column definitions
       if (this.cell.result_data.columns) {
-        this.columnDefs = this.cell.result_data.columns.map((col: string) => ({
-          field: col,
-          headerName: col,
-          filter: 'agTextColumnFilter',
-          floatingFilter: true,
-          cellRenderer: (params: any) => {
-            return this.formatCellValueWithLookup(params.data, col);
+        this.columnDefs = this.cell.result_data.columns.map((col: string) => {
+          // Calculate appropriate width based on column name and sample data
+          const headerLength = col.length * 8; // Approximate pixel width per character
+          let maxDataLength = 100; // Default minimum
+          
+          // Sample first 10 rows to estimate content width
+          if (this.cell.result_data.data && this.cell.result_data.data.length > 0) {
+            const sampleSize = Math.min(10, this.cell.result_data.data.length);
+            for (let i = 0; i < sampleSize; i++) {
+              const value = String(this.cell.result_data.data[i][col] || '');
+              maxDataLength = Math.max(maxDataLength, value.length * 7);
+            }
           }
-        }));
+          
+          // Set appropriate width with reasonable limits
+          const suggestedWidth = Math.max(headerLength + 40, Math.min(maxDataLength, 300));
+          
+          return {
+            field: col,
+            headerName: col,
+            filter: 'agTextColumnFilter',
+            floatingFilter: true,
+            width: suggestedWidth,
+            minWidth: 80,
+            maxWidth: 400,
+            cellRenderer: (params: any) => {
+              return this.formatCellValueWithLookup(params.data, col);
+            }
+          };
+        });
         
         // Refresh grid if it's already initialized
         if (this.gridApi) {
@@ -574,9 +604,12 @@ export class NotebookCellComponent implements OnChanges, OnInit {
   onGridReady(params: GridReadyEvent) {
     this.gridApi = params.api;
     
-    // Auto-size columns to fit content
+    // Auto-size columns based on content, not container width
     setTimeout(() => {
-      this.gridApi.sizeColumnsToFit();
+      // Don't use sizeColumnsToFit() as it expands columns to fill width
+      // Instead, let the column widths be determined by content
+      // The autoSizeStrategy in gridOptions will handle this
+      this.gridApi.autoSizeAllColumns(false);
     }, 100);
     
     // Set initial page size from preferences
