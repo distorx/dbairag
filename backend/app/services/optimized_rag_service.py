@@ -1089,6 +1089,17 @@ class OptimizedRAGService:
                               FROM Students WITH (NOLOCK) 
                               WHERE DATEDIFF(YEAR, DateOfBirth, GETDATE()) = {age}"""
         
+        # Pattern: Most used/popular universities or institutions
+        if any(term in prompt_lower for term in ["university", "universities", "institution", "college"]) and \
+           any(term in prompt_lower for term in ["more used", "most used", "popular", "top", "count"]):
+            logger.info("🎯 Fallback pattern: Most used universities/institutions")
+            return """SELECT TOP 10 
+                     InstitutionName,
+                     COUNT(*) as StudentCount
+                     FROM StudentInstitutions WITH (NOLOCK)
+                     GROUP BY InstitutionName
+                     ORDER BY StudentCount DESC"""
+        
         # Pattern: Boolean field queries (Is* fields are typically flags)
         # Handle queries for fields like IsGovernmentLegalTutor by breaking down the words
         if "student" in prompt_lower:
