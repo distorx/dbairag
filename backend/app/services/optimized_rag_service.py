@@ -1089,6 +1089,23 @@ class OptimizedRAGService:
                               FROM Students WITH (NOLOCK) 
                               WHERE DATEDIFF(YEAR, DateOfBirth, GETDATE()) = {age}"""
         
+        # Pattern: Boolean field queries (Is* fields are typically flags)
+        # Handle queries for fields like IsGovernmentLegalTutor by breaking down the words
+        if "student" in prompt_lower:
+            # Check for government/legal/tutor combinations (with misspellings)
+            gov_terms = ["government", "goverment", "govt", "gov"]
+            legal_terms = ["legal", "leagal", "ligal"]
+            tutor_terms = ["tutor", "tuter", "guardian", "guardien"]
+            
+            has_gov = any(term in prompt_lower for term in gov_terms)
+            has_legal = any(term in prompt_lower for term in legal_terms)
+            has_tutor = any(term in prompt_lower for term in tutor_terms)
+            
+            # If we have at least 2 of the 3 terms, it's likely IsGovernmentLegalTutor
+            if sum([has_gov, has_legal, has_tutor]) >= 2:
+                logger.info("🎯 Fallback pattern: Students with government legal tutor (IsGovernmentLegalTutor flag)")
+                return "SELECT COUNT(*) AS total FROM Students WITH (NOLOCK) WHERE IsGovernmentLegalTutor = 1"
+        
         # Pattern: GPA-based queries
         if "student" in prompt_lower and "gpa" in prompt_lower and any(op in prompt_lower for op in ["greater", "more", "above", ">", "higher"]):
             numbers = re.findall(r'\d+\.?\d*', prompt_lower)
