@@ -12,6 +12,7 @@ from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough
 from ..config import settings
+from .query_optimizer_service import query_optimizer
 
 logger = logging.getLogger(__name__)
 
@@ -1347,9 +1348,40 @@ ORDER BY GROUPING(sa.Status), sa.Status"""
             pattern_time = time.time() - pattern_start
             
             if pattern_sql:
+                # Apply query optimization to pattern-matched SQL too
+                optimization_start = time.time()
+                try:
+                    # Prepare schema info for optimizer
+                    optimizer_schema = {
+                        "tables": schema_info.get("tables", {}) if schema_info else {},
+                        "indexes": self.db_metadata.get("indexes", {}),
+                        "foreign_keys": self.db_metadata.get("foreign_keys", {}),
+                        "table_stats": self.db_metadata.get("table_stats", {})
+                    }
+                    
+                    # Optimize the pattern-matched query
+                    optimized_sql, optimization_metadata = query_optimizer.optimize_query(
+                        pattern_sql,
+                        optimizer_schema,
+                        query_stats=None
+                    )
+                    
+                    # Use optimized query if available
+                    if optimized_sql:
+                        pattern_sql = optimized_sql
+                        metadata["optimization"] = optimization_metadata
+                        logger.info(f"⚡ OptimizedRAG: Pattern query optimized with {len(optimization_metadata.get('optimizations', []))} improvements")
+                    
+                except Exception as opt_error:
+                    logger.warning(f"⚠️ OptimizedRAG: Pattern optimization failed, using original: {str(opt_error)}")
+                    metadata["optimization_error"] = str(opt_error)
+                
+                optimization_time = time.time() - optimization_start
+                
                 metadata.update({
                     "method": "pattern_matching",
                     "pattern_match_time": f"{pattern_time*1000:.2f}ms",
+                    "optimization_time": f"{optimization_time*1000:.2f}ms",
                     "result_type": "table"
                 })
                 total_time = time.time() - start_time
@@ -1428,12 +1460,43 @@ SQL:"""
                 sql_query = sql_query[:-1]
             
             llm_time = time.time() - llm_start
+            
+            # Apply query optimization
+            optimization_start = time.time()
+            try:
+                # Prepare schema info for optimizer
+                optimizer_schema = {
+                    "tables": table_info,
+                    "indexes": self.db_metadata.get("indexes", {}),
+                    "foreign_keys": self.db_metadata.get("foreign_keys", {}),
+                    "table_stats": self.db_metadata.get("table_stats", {})
+                }
+                
+                # Optimize the generated query
+                optimized_sql, optimization_metadata = query_optimizer.optimize_query(
+                    sql_query,
+                    optimizer_schema,
+                    query_stats=metadata.get("query_stats")
+                )
+                
+                # Use optimized query if available
+                if optimized_sql:
+                    sql_query = optimized_sql
+                    metadata["optimization"] = optimization_metadata
+                    logger.info(f"⚡ OptimizedRAG: Query optimized with {len(optimization_metadata.get('optimizations', []))} improvements")
+                
+            except Exception as opt_error:
+                logger.warning(f"⚠️ OptimizedRAG: Optimization failed, using original query: {str(opt_error)}")
+                metadata["optimization_error"] = str(opt_error)
+            
+            optimization_time = time.time() - optimization_start
             total_time = time.time() - start_time
             
             metadata.update({
                 "method": "llm_optimized",
                 "context_time": f"{context_time*1000:.2f}ms",
                 "llm_time": f"{llm_time*1000:.2f}ms",
+                "optimization_time": f"{optimization_time*1000:.2f}ms",
                 "total_time": f"{total_time*1000:.2f}ms",
                 "result_type": "table",
                 "schema_context_length": len(schema_context)

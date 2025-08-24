@@ -32,6 +32,7 @@ from ..services.queries_service import get_comprehensive_context, refresh_all_me
 from ..services.schema_sync_service import SchemaSyncService
 from ..services.query_suggestions_service import QuerySuggestionsService
 from ..services.hints_storage_service import hints_storage
+from ..services.query_optimizer_service import query_optimizer
 from ..utils.json_utils import safe_json_dumps
 
 router = APIRouter(prefix="/api/queries", tags=["queries"])
@@ -1613,4 +1614,159 @@ async def get_hints_statistics():
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch statistics: {str(e)}"
+        )
+
+@router.post("/optimize")
+async def optimize_query(
+    request: QueryRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Optimize a SQL query for better performance
+    Analyzes the query and applies various optimization techniques
+    """
+    logger.info(f"🔧 Optimizing query: {request.prompt}")
+    
+    # Get connection
+    result = await db.execute(
+        select(ConnectionModel).where(ConnectionModel.id == request.connection_id)
+    )
+    connection = result.scalar_one_or_none()
+    
+    if not connection:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Connection not found"
+        )
+    
+    try:
+        # First generate the SQL if it's a natural language prompt
+        if not request.prompt.strip().upper().startswith("SELECT"):
+            # Generate SQL from natural language
+            comprehensive_context = await get_comprehensive_context(
+                schema_analyzer, enum_service, documentation_service,
+                connection, str(connection.id), db
+            )
+            
+            generated_sql, _ = await rag_service.generate_sql_with_full_context(
+                request.prompt, comprehensive_context, str(connection.id)
+            )
+        else:
+            # Already SQL
+            generated_sql = request.prompt
+        
+        # Get schema info for optimization
+        schema_info = await schema_cache_service.get_cached_schema(
+            connection.connection_string,
+            str(connection.id),
+            force_refresh=False
+        )
+        
+        # Optimize the query
+        optimized_sql, optimization_metadata = query_optimizer.optimize_query(
+            generated_sql,
+            schema_info
+        )
+        
+        # Generate optimization report
+        report = query_optimizer.generate_optimization_report(optimized_sql, optimization_metadata)
+        
+        return {
+            "original_prompt": request.prompt,
+            "original_sql": generated_sql,
+            "optimized_sql": optimized_sql,
+            "optimizations_applied": optimization_metadata.get("optimizations_applied", []),
+            "estimated_improvement": optimization_metadata.get("estimated_improvement", 0),
+            "suggestions": optimization_metadata.get("suggestions", []),
+            "report": report
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Error optimizing query: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to optimize query: {str(e)}"
+        )
+
+@router.post("/analyze-plan")
+async def analyze_query_plan(
+    request: QueryRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Analyze the execution plan of a query
+    Provides insights into query performance and suggestions
+    """
+    logger.info(f"📊 Analyzing query plan: {request.prompt}")
+    
+    # Get connection
+    result = await db.execute(
+        select(ConnectionModel).where(ConnectionModel.id == request.connection_id)
+    )
+    connection = result.scalar_one_or_none()
+    
+    if not connection:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Connection not found"
+        )
+    
+    try:
+        # First generate the SQL if needed
+        if not request.prompt.strip().upper().startswith("SELECT"):
+            comprehensive_context = await get_comprehensive_context(
+                schema_analyzer, enum_service, documentation_service,
+                connection, str(connection.id), db
+            )
+            
+            generated_sql, _ = await rag_service.generate_sql_with_full_context(
+                request.prompt, comprehensive_context, str(connection.id)
+            )
+        else:
+            generated_sql = request.prompt
+        
+        # Get schema info
+        schema_info = await schema_cache_service.get_cached_schema(
+            connection.connection_string,
+            str(connection.id),
+            force_refresh=False
+        )
+        
+        # Analyze query structure
+        query_analysis = query_optimizer._analyze_query_structure(generated_sql)
+        
+        # Get optimization suggestions
+        optimized_sql, optimization_metadata = query_optimizer.optimize_query(
+            generated_sql,
+            schema_info
+        )
+        
+        # Simulate execution plan analysis (in production, this would connect to DB)
+        plan_analysis = await query_optimizer.analyze_query_plan(
+            connection.connection_string,
+            generated_sql
+        )
+        
+        return {
+            "sql_query": generated_sql,
+            "query_analysis": query_analysis,
+            "optimization_suggestions": optimization_metadata.get("suggestions", []),
+            "missing_indexes": plan_analysis.get("missing_indexes", []),
+            "estimated_cost": plan_analysis.get("estimated_cost"),
+            "estimated_rows": plan_analysis.get("estimated_rows"),
+            "warnings": plan_analysis.get("warnings", []),
+            "performance_tips": [
+                "Consider adding indexes on frequently queried columns",
+                "Use NOLOCK hint for read-only queries",
+                "Optimize JOIN order (smallest tables first)",
+                "Avoid functions on indexed columns in WHERE clause",
+                "Use EXISTS instead of IN for subqueries"
+            ]
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Error analyzing query plan: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to analyze query plan: {str(e)}"
         )
