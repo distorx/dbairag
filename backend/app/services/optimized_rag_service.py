@@ -855,6 +855,209 @@ class OptimizedRAGService:
         
         return None
     
+    def _generate_board_member_patterns(self, prompt_lower: str) -> Optional[str]:
+        """Generate patterns for board member approval queries"""
+        
+        # Check for all board members approved
+        if any(phrase in prompt_lower for phrase in ["all board", "all three board", "all 3 board", "fully approved", "completely approved"]):
+            logger.info("🎯 Board Pattern: Applications approved by all board members")
+            if "count" in prompt_lower and "student" in prompt_lower:
+                return """SELECT COUNT(DISTINCT s.Id) AS total 
+                         FROM Students s WITH (NOLOCK) 
+                         INNER JOIN ScholarshipApplications sa WITH (NOLOCK) ON s.Id = sa.StudentId 
+                         WHERE sa.BoardMember1Approved = 1 
+                           AND sa.BoardMember2Approved = 1 
+                           AND sa.BoardMember3Approved = 1"""
+            else:
+                return """SELECT COUNT(*) AS total 
+                         FROM ScholarshipApplications WITH (NOLOCK) 
+                         WHERE BoardMember1Approved = 1 
+                           AND BoardMember2Approved = 1 
+                           AND BoardMember3Approved = 1"""
+        
+        # Check for at least one board member approved
+        elif any(phrase in prompt_lower for phrase in ["at least one board", "any board", "one or more board"]):
+            logger.info("🎯 Board Pattern: Applications approved by at least one board member")
+            if "count" in prompt_lower and "student" in prompt_lower:
+                return """SELECT COUNT(DISTINCT s.Id) AS total 
+                         FROM Students s WITH (NOLOCK) 
+                         INNER JOIN ScholarshipApplications sa WITH (NOLOCK) ON s.Id = sa.StudentId 
+                         WHERE sa.BoardMember1Approved = 1 
+                            OR sa.BoardMember2Approved = 1 
+                            OR sa.BoardMember3Approved = 1"""
+            else:
+                return """SELECT COUNT(*) AS total 
+                         FROM ScholarshipApplications WITH (NOLOCK) 
+                         WHERE BoardMember1Approved = 1 
+                            OR BoardMember2Approved = 1 
+                            OR BoardMember3Approved = 1"""
+        
+        # Check for specific board member patterns
+        elif "board member 1" in prompt_lower or "first board" in prompt_lower:
+            logger.info("🎯 Board Pattern: Applications approved by board member 1")
+            if "count" in prompt_lower and "student" in prompt_lower:
+                return """SELECT COUNT(DISTINCT s.Id) AS total 
+                         FROM Students s WITH (NOLOCK) 
+                         INNER JOIN ScholarshipApplications sa WITH (NOLOCK) ON s.Id = sa.StudentId 
+                         WHERE sa.BoardMember1Approved = 1"""
+            else:
+                return "SELECT COUNT(*) AS total FROM ScholarshipApplications WITH (NOLOCK) WHERE BoardMember1Approved = 1"
+        elif "board member 2" in prompt_lower or "second board" in prompt_lower:
+            logger.info("🎯 Board Pattern: Applications approved by board member 2")
+            if "count" in prompt_lower and "student" in prompt_lower:
+                return """SELECT COUNT(DISTINCT s.Id) AS total 
+                         FROM Students s WITH (NOLOCK) 
+                         INNER JOIN ScholarshipApplications sa WITH (NOLOCK) ON s.Id = sa.StudentId 
+                         WHERE sa.BoardMember2Approved = 1"""
+            else:
+                return "SELECT COUNT(*) AS total FROM ScholarshipApplications WITH (NOLOCK) WHERE BoardMember2Approved = 1"
+        elif "board member 3" in prompt_lower or "third board" in prompt_lower:
+            logger.info("🎯 Board Pattern: Applications approved by board member 3")
+            if "count" in prompt_lower and "student" in prompt_lower:
+                return """SELECT COUNT(DISTINCT s.Id) AS total 
+                         FROM Students s WITH (NOLOCK) 
+                         INNER JOIN ScholarshipApplications sa WITH (NOLOCK) ON s.Id = sa.StudentId 
+                         WHERE sa.BoardMember3Approved = 1"""
+            else:
+                return "SELECT COUNT(*) AS total FROM ScholarshipApplications WITH (NOLOCK) WHERE BoardMember3Approved = 1"
+        
+        # Check for pending approval (not all board members have approved)
+        elif any(phrase in prompt_lower for phrase in ["pending", "waiting", "not all", "partial"]):
+            logger.info("🎯 Board Pattern: Applications pending full approval")
+            if "count" in prompt_lower and "student" in prompt_lower:
+                return """SELECT COUNT(DISTINCT s.Id) AS total 
+                         FROM Students s WITH (NOLOCK) 
+                         INNER JOIN ScholarshipApplications sa WITH (NOLOCK) ON s.Id = sa.StudentId 
+                         WHERE NOT (sa.BoardMember1Approved = 1 
+                               AND sa.BoardMember2Approved = 1 
+                               AND sa.BoardMember3Approved = 1)
+                           AND sa.Status != 5"""  # Exclude rejected
+            else:
+                return """SELECT COUNT(*) AS total 
+                         FROM ScholarshipApplications WITH (NOLOCK) 
+                         WHERE NOT (BoardMember1Approved = 1 
+                               AND BoardMember2Approved = 1 
+                               AND BoardMember3Approved = 1)
+                           AND Status != 5"""  # Exclude rejected
+        
+        return None
+    
+    def _generate_application_status_patterns(self, prompt_lower: str) -> Optional[str]:
+        """Generate patterns for application status queries"""
+        
+        # Direct application count queries (no need to join Students table)
+        if "count" in prompt_lower and "application" in prompt_lower and "student" not in prompt_lower:
+            # Check for rejected applications
+            if any(word in prompt_lower for word in ["rejected", "reject", "denied"]):
+                logger.info("🎯 Application Pattern: Count rejected applications")
+                return "SELECT COUNT(*) AS total FROM ScholarshipApplications WITH (NOLOCK) WHERE Status = 5"
+            
+            # Check for approved applications (Status = 3 means all board members approved)
+            elif any(word in prompt_lower for word in ["approved", "approve", "accepted"]):
+                logger.info("🎯 Application Pattern: Count approved applications")
+                return "SELECT COUNT(*) AS total FROM ScholarshipApplications WITH (NOLOCK) WHERE Status = 3"
+            
+            # Check for pending applications
+            elif any(word in prompt_lower for word in ["pending", "waiting", "review"]):
+                logger.info("🎯 Application Pattern: Count pending applications")
+                return "SELECT COUNT(*) AS total FROM ScholarshipApplications WITH (NOLOCK) WHERE Status = 1"
+            
+            # Check for submitted applications
+            elif any(word in prompt_lower for word in ["submitted", "submit"]):
+                logger.info("🎯 Application Pattern: Count submitted applications")
+                return "SELECT COUNT(*) AS total FROM ScholarshipApplications WITH (NOLOCK) WHERE Status = 2"
+            
+            # Default: count all applications
+            else:
+                logger.info("🎯 Application Pattern: Count all applications")
+                return "SELECT COUNT(*) AS total FROM ScholarshipApplications WITH (NOLOCK)"
+        
+        return None
+    
+    def _generate_document_requirement_patterns(self, prompt_lower: str) -> Optional[str]:
+        """Generate patterns for document requirement queries"""
+        
+        # Pattern: Application readiness (all 5 document types required)
+        if any(phrase in prompt_lower for phrase in ["ready to be approved", "ready for approval", "complete documents", "all documents", "application ready"]):
+            if "count" in prompt_lower and "student" in prompt_lower:
+                logger.info("🎯 Document pattern: Students with complete documents for approval")
+                return """SELECT COUNT(DISTINCT s.Id) AS total 
+                         FROM Students s WITH (NOLOCK) 
+                         WHERE s.Id IN (
+                             SELECT StudentId 
+                             FROM StudentDocuments WITH (NOLOCK) 
+                             WHERE IsActive = 1 AND IsApproved = 1 
+                             GROUP BY StudentId 
+                             HAVING COUNT(DISTINCT DocumentTypeId) = 5
+                         )"""
+            
+            if "list" in prompt_lower or "show" in prompt_lower:
+                logger.info("🎯 Document pattern: List students with complete documents")
+                return """SELECT DISTINCT s.Id, s.FirstName, s.LastName, s.SSN 
+                         FROM Students s WITH (NOLOCK) 
+                         WHERE s.Id IN (
+                             SELECT StudentId 
+                             FROM StudentDocuments WITH (NOLOCK) 
+                             WHERE IsActive = 1 AND IsApproved = 1 
+                             GROUP BY StudentId 
+                             HAVING COUNT(DISTINCT DocumentTypeId) = 5
+                         )"""
+        
+        # Pattern: Applications ready for board review (complete documents + submitted status)
+        if any(phrase in prompt_lower for phrase in ["ready for board", "ready for review", "board review ready"]):
+            if "count" in prompt_lower:
+                logger.info("🎯 Document pattern: Applications ready for board review")
+                return """SELECT COUNT(DISTINCT sa.Id) AS total 
+                         FROM ScholarshipApplications sa WITH (NOLOCK) 
+                         INNER JOIN Students s WITH (NOLOCK) ON sa.StudentId = s.Id 
+                         WHERE sa.Status IN (1, 2)  -- Pending or Submitted
+                           AND s.Id IN (
+                               SELECT StudentId 
+                               FROM StudentDocuments WITH (NOLOCK) 
+                               WHERE IsActive = 1 AND IsApproved = 1 
+                               GROUP BY StudentId 
+                               HAVING COUNT(DISTINCT DocumentTypeId) = 5
+                           )"""
+        
+        # Pattern: Missing documents
+        if any(phrase in prompt_lower for phrase in ["missing documents", "incomplete documents", "without all documents"]):
+            if "count" in prompt_lower and "student" in prompt_lower:
+                logger.info("🎯 Document pattern: Students with incomplete documents")
+                return """SELECT COUNT(DISTINCT s.Id) AS total 
+                         FROM Students s WITH (NOLOCK) 
+                         LEFT JOIN (
+                             SELECT StudentId, COUNT(DISTINCT DocumentTypeId) as DocCount 
+                             FROM StudentDocuments WITH (NOLOCK) 
+                             WHERE IsActive = 1 AND IsApproved = 1 
+                             GROUP BY StudentId
+                         ) docs ON s.Id = docs.StudentId 
+                         WHERE ISNULL(docs.DocCount, 0) < 5"""
+        
+        # Pattern: Specific document type queries
+        if "document" in prompt_lower:
+            # Check for specific document types by name
+            doc_types = {
+                "admission letter": 1,
+                "university acceptance": 1,
+                "carta de aceptación": 1,
+                "birth certificate": 2,
+                "acta de nacimiento": 2,
+                "college board": 4,
+                "college board results": 4
+            }
+            
+            for doc_name, doc_type_id in doc_types.items():
+                if doc_name in prompt_lower:
+                    if "count" in prompt_lower and "student" in prompt_lower:
+                        logger.info(f"🎯 Document pattern: Students with {doc_name}")
+                        return f"""SELECT COUNT(DISTINCT StudentId) AS total 
+                                  FROM StudentDocuments WITH (NOLOCK) 
+                                  WHERE DocumentTypeId = {doc_type_id} 
+                                    AND IsActive = 1 
+                                    AND IsApproved = 1"""
+        
+        return None
+    
     def _generate_fallback_patterns(self, prompt_lower: str, original_prompt: str = None) -> Optional[str]:
         """Generate common patterns without requiring full schema analysis"""
         
@@ -1135,6 +1338,27 @@ class OptimizedRAGService:
                 # Enhance with metadata before returning
                 return self._enhance_query_with_metadata(location_query, prompt, schema_info, connection_id)
         
+        # Check for board member approval patterns BEFORE vocabulary service
+        if "application" in prompt_lower and ("board" in prompt_lower or ("approved" in prompt_lower and "all" in prompt_lower)):
+            board_result = self._generate_board_member_patterns(prompt_lower)
+            if board_result:
+                logger.info("🎯 Board Member Pattern: Generated board approval query")
+                return board_result
+        
+        # Check for application status patterns (direct application counts)
+        if "count" in prompt_lower and "application" in prompt_lower:
+            app_result = self._generate_application_status_patterns(prompt_lower)
+            if app_result:
+                logger.info("🎯 Application Status Pattern: Generated application count query")
+                return app_result
+        
+        # Check for document requirement patterns
+        if any(phrase in prompt_lower for phrase in ["ready", "document", "complete", "missing"]):
+            doc_result = self._generate_document_requirement_patterns(prompt_lower)
+            if doc_result:
+                logger.info("🎯 Document Requirement Pattern: Generated document readiness query")
+                return doc_result
+        
         # Try vocabulary-based query generation (NEW)
         vocabulary_result = self._generate_vocabulary_based_query(prompt_lower, prompt)
         if vocabulary_result:
@@ -1363,6 +1587,72 @@ ORDER BY GROUPING(sa.Status), sa.Status"""
                 if status_text in prompt_lower:
                     logger.info(f"🎯 Pattern matched: count students with application status {status_text} (value={status_value})")
                     return f"SELECT COUNT(DISTINCT s.Id) AS total FROM Students s WITH (NOLOCK) INNER JOIN ScholarshipApplications sa WITH (NOLOCK) ON s.Id = sa.StudentId WHERE sa.Status = {status_value}"
+        
+        # Pattern: Board member approval queries
+        if "application" in prompt_lower and ("board" in prompt_lower or "approved" in prompt_lower):
+            # Check for all board members approved
+            if any(phrase in prompt_lower for phrase in ["all board", "all three board", "all 3 board", "fully approved", "completely approved"]):
+                logger.info("🎯 Pattern matched: applications approved by all board members")
+                if "count" in prompt_lower and "student" in prompt_lower:
+                    return """SELECT COUNT(DISTINCT s.Id) AS total 
+                             FROM Students s WITH (NOLOCK) 
+                             INNER JOIN ScholarshipApplications sa WITH (NOLOCK) ON s.Id = sa.StudentId 
+                             WHERE sa.BoardMember1Approved = 1 
+                               AND sa.BoardMember2Approved = 1 
+                               AND sa.BoardMember3Approved = 1"""
+                else:
+                    return """SELECT COUNT(*) AS total 
+                             FROM ScholarshipApplications WITH (NOLOCK) 
+                             WHERE BoardMember1Approved = 1 
+                               AND BoardMember2Approved = 1 
+                               AND BoardMember3Approved = 1"""
+            
+            # Check for at least one board member approved
+            elif any(phrase in prompt_lower for phrase in ["at least one board", "any board", "one or more board"]):
+                logger.info("🎯 Pattern matched: applications approved by at least one board member")
+                if "count" in prompt_lower and "student" in prompt_lower:
+                    return """SELECT COUNT(DISTINCT s.Id) AS total 
+                             FROM Students s WITH (NOLOCK) 
+                             INNER JOIN ScholarshipApplications sa WITH (NOLOCK) ON s.Id = sa.StudentId 
+                             WHERE sa.BoardMember1Approved = 1 
+                                OR sa.BoardMember2Approved = 1 
+                                OR sa.BoardMember3Approved = 1"""
+                else:
+                    return """SELECT COUNT(*) AS total 
+                             FROM ScholarshipApplications WITH (NOLOCK) 
+                             WHERE BoardMember1Approved = 1 
+                                OR BoardMember2Approved = 1 
+                                OR BoardMember3Approved = 1"""
+            
+            # Check for specific board member patterns
+            elif "board member 1" in prompt_lower or "first board" in prompt_lower:
+                logger.info("🎯 Pattern matched: applications approved by board member 1")
+                return "SELECT COUNT(*) AS total FROM ScholarshipApplications WITH (NOLOCK) WHERE BoardMember1Approved = 1"
+            elif "board member 2" in prompt_lower or "second board" in prompt_lower:
+                logger.info("🎯 Pattern matched: applications approved by board member 2")
+                return "SELECT COUNT(*) AS total FROM ScholarshipApplications WITH (NOLOCK) WHERE BoardMember2Approved = 1"
+            elif "board member 3" in prompt_lower or "third board" in prompt_lower:
+                logger.info("🎯 Pattern matched: applications approved by board member 3")
+                return "SELECT COUNT(*) AS total FROM ScholarshipApplications WITH (NOLOCK) WHERE BoardMember3Approved = 1"
+            
+            # Check for pending approval (not all board members have approved)
+            elif any(phrase in prompt_lower for phrase in ["pending", "waiting", "not all", "partial"]):
+                logger.info("🎯 Pattern matched: applications pending full approval")
+                if "count" in prompt_lower and "student" in prompt_lower:
+                    return """SELECT COUNT(DISTINCT s.Id) AS total 
+                             FROM Students s WITH (NOLOCK) 
+                             INNER JOIN ScholarshipApplications sa WITH (NOLOCK) ON s.Id = sa.StudentId 
+                             WHERE NOT (sa.BoardMember1Approved = 1 
+                                   AND sa.BoardMember2Approved = 1 
+                                   AND sa.BoardMember3Approved = 1)
+                               AND sa.Status != 5"""  # Exclude rejected
+                else:
+                    return """SELECT COUNT(*) AS total 
+                             FROM ScholarshipApplications WITH (NOLOCK) 
+                             WHERE NOT (BoardMember1Approved = 1 
+                                   AND BoardMember2Approved = 1 
+                                   AND BoardMember3Approved = 1)
+                               AND Status != 5"""  # Exclude rejected
         
         # Pattern: count students with applications (any status)
         if "count" in prompt_lower and ("student" in prompt_lower or "students" in prompt_lower) and "application" in prompt_lower:
