@@ -39,7 +39,7 @@ class SQLCmdService:
         try:
             params = SQLCmdService.parse_connection_string(connection_string)
             
-            # Build sqlcmd command
+            # Build sqlcmd command with connection timeout
             cmd = [
                 'sqlcmd',
                 '-S', params['server'],
@@ -49,19 +49,30 @@ class SQLCmdService:
                 '-Q', query,
                 '-W',        # Remove trailing spaces
                 '-s', '|',   # Column separator
-                '-w', '999'  # Wide output to prevent wrapping
+                '-w', '999', # Wide output to prevent wrapping
+                '-l', '5'    # Login timeout of 5 seconds
             ]
             
             logger.info(f"🔧 SQLCmd: Executing query: {query}")
             
-            # Execute with async subprocess
+            # Execute with async subprocess and timeout
             process = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE
             )
             
-            stdout, stderr = await process.communicate()
+            # Add 10 second timeout for query execution
+            try:
+                stdout, stderr = await asyncio.wait_for(
+                    process.communicate(),
+                    timeout=10.0  # 10 second timeout
+                )
+            except asyncio.TimeoutError:
+                process.kill()
+                await process.wait()
+                logger.error("❌ SQLCmd timeout: Query took longer than 10 seconds")
+                raise Exception("Query timeout: SQL query took longer than 10 seconds to execute")
             
             if process.returncode != 0:
                 error_msg = stderr.decode().strip()

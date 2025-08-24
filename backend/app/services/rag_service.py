@@ -69,11 +69,37 @@ class RAGService:
         print(f"DEBUG_FULL_CONTEXT: Starting SQL generation for: {prompt}")
         print(f"DEBUG_FULL_CONTEXT: LLM configured: {self.llm is not None}")
         
-        # QUICK FIX: Handle specific "students with application" queries
+        # QUICK FIX: Handle specific "students with application" queries with status filtering
         prompt_lower = prompt.lower().strip()
         if "count" in prompt_lower and "students" in prompt_lower and ("application" in prompt_lower or "scholarship" in prompt_lower):
-            print("DEBUG_FULL_CONTEXT: Quick fix for students with applications query")
-            correct_sql = "SELECT COUNT(DISTINCT s.Id) AS total FROM Students s INNER JOIN ScholarshipApplications sa ON s.Id = sa.StudentId WITH (NOLOCK)"
+            # Check for status keywords
+            status_keywords = {
+                "rejected": 5,
+                "denied": 5,
+                "approved": 4,
+                "accepted": 4,
+                "pending": 1,
+                "submitted": 2,
+                "under review": 3,
+                "reviewing": 3,
+                "cancelled": 6,
+                "canceled": 6
+            }
+            
+            # Look for status in the prompt
+            found_status = None
+            for status_text, status_value in status_keywords.items():
+                if status_text in prompt_lower:
+                    found_status = status_value
+                    print(f"DEBUG_FULL_CONTEXT: Quick fix with status filter - {status_text} (value={status_value})")
+                    break
+            
+            if found_status:
+                correct_sql = f"SELECT COUNT(DISTINCT s.Id) AS total FROM Students s WITH (NOLOCK) INNER JOIN ScholarshipApplications sa WITH (NOLOCK) ON s.Id = sa.StudentId WHERE sa.Status = {found_status}"
+            else:
+                print("DEBUG_FULL_CONTEXT: Quick fix for students with applications query (no status filter)")
+                correct_sql = "SELECT COUNT(DISTINCT s.Id) AS total FROM Students s WITH (NOLOCK) INNER JOIN ScholarshipApplications sa WITH (NOLOCK) ON s.Id = sa.StudentId"
+            
             return correct_sql, {"result_type": "table", "quick_fix": True}
         
         # Extract components from comprehensive context

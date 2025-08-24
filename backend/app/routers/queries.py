@@ -220,17 +220,34 @@ async def execute_query_optimized(
         
         logger.info(f"✅ OPTIMIZED: Real query completed in {total_time}ms with {query_result.get('row_count', 0)} rows")
         
-        # Save successful query pattern to MongoDB for learning
-        try:
-            await hints_storage.save_successful_query(
-                prompt=request.prompt,
-                sql_query=sql_query,
-                connection_id=str(connection.id),
-                execution_time_ms=total_time,
-                result_count=query_result.get("row_count", 0)
-            )
-        except Exception as e:
-            logger.warning(f"Failed to save query hint: {e}")
+        # Handle empty table results
+        row_count = query_result.get("row_count", 0)
+        if row_count == 0 and "COUNT" in sql_query.upper():
+            # Check if this is a count query that returned 0
+            # Add informative message to metadata
+            metadata["info"] = "No records found in the table or matching the criteria"
+            metadata["empty_result"] = True
+            
+            # Extract table name from SQL for better messaging
+            import re
+            table_match = re.search(r'FROM\s+(\w+)', sql_query, re.IGNORECASE)
+            if table_match:
+                table_name = table_match.group(1)
+                metadata["table_queried"] = table_name
+                logger.info(f"ℹ️ OPTIMIZED: Query returned 0 records from table: {table_name}")
+        
+        # Save successful query pattern to MongoDB for learning (skip empty results)
+        if row_count > 0:
+            try:
+                await hints_storage.save_successful_query(
+                    prompt=request.prompt,
+                    sql_query=sql_query,
+                    connection_id=str(connection.id),
+                    execution_time_ms=total_time,
+                    result_count=row_count
+                )
+            except Exception as e:
+                logger.warning(f"Failed to save query hint: {e}")
         
         return QueryResponse(
             prompt=request.prompt,

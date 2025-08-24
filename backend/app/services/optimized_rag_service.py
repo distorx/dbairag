@@ -54,6 +54,73 @@ class OptimizedRAGService:
         except ImportError:
             logger.warning("⚠️ OptimizedRAGService: Column Intelligence Service not available")
     
+    def _identify_standalone_tables(self, schema_info: Dict[str, Any]) -> set:
+        """Identify tables that are standalone (no relationships, no indexes, likely irrelevant)"""
+        standalone = set()
+        tables = schema_info.get("tables", {})
+        
+        # Tables that are known to be standalone or less relevant
+        known_standalone = {
+            "__EFMigrationsHistory",  # EF migrations
+            "AspNetRoleClaims", "AspNetUserClaims", "AspNetUserLogins", "AspNetUserTokens",  # ASP.NET Identity
+            "AuditLogs",  # Audit logs
+            "ListaExclusiones", "ListaIncusiones",  # Exclusion/inclusion lists
+            "MissingDocumentIds",  # Missing IDs
+            # Backup and copy tables
+            "StudentDocuments_202050807_3pm",
+            "StudentDocuments_Backup_20250811_055943",
+            "StudentDocuments_Backup_Duplicates",
+            "StudentDocuments_Backup_Production_20250723",
+            "StudentDocuments_Copy",
+            "StudentDocumentsRick",
+            "StudentDocumentsRick2",
+            "StudentDocumentsSave",
+            "StudentRecomendeds_20250721",
+            "StudentRecommendeds_20250815_143000",
+            "StudentRecommendeds_Backup_20250811",
+            "StudentToCreate",
+            "CopiaAntonioEst",
+            "EstudiantesExcelenciaAcademica",
+            "StudentDocumemtsCepe",
+            "distritos_pueblos"
+        }
+        
+        for table_name, table_info in tables.items():
+            # Add known standalone tables
+            if table_name in known_standalone:
+                standalone.add(table_name)
+                continue
+                
+            # Check if table has no foreign keys (relationships)
+            has_foreign_keys = bool(table_info.get("foreign_keys", []))
+            
+            # Check if table has no indexes (except primary key)
+            indexes = table_info.get("indexes", {})
+            has_meaningful_indexes = False
+            for idx_name, idx_info in indexes.items():
+                # Skip primary key indexes
+                if "primary" not in idx_name.lower() and "pk" not in idx_name.lower():
+                    has_meaningful_indexes = True
+                    break
+            
+            # Check if table is referenced by other tables
+            is_referenced = False
+            for other_table_name, other_table_info in tables.items():
+                if other_table_name != table_name:
+                    for fk in other_table_info.get("foreign_keys", []):
+                        if fk.get("referenced_table") == table_name:
+                            is_referenced = True
+                            break
+                if is_referenced:
+                    break
+            
+            # Table is standalone if it has no relationships and no meaningful indexes
+            if not has_foreign_keys and not has_meaningful_indexes and not is_referenced:
+                standalone.add(table_name)
+        
+        logger.info(f"🔍 Identified {len(standalone)} standalone/irrelevant tables")
+        return standalone
+    
     def _normalize_for_comparison(self, text: str) -> str:
         """Normalize text by removing accents for comparison"""
         # Convert to NFD (decomposed) form and filter out combining characters
@@ -794,6 +861,69 @@ class OptimizedRAGService:
         
         return None
 
+    def _enhance_query_with_metadata(self, base_query: str, prompt: str, schema_info: Dict[str, Any], connection_id: int = 1) -> str:
+        """Enhance query using indexes, relationships, and enums for better performance"""
+        try:
+            logger.info("🔧 Enhancing query with metadata (indexes, relationships, enums)")
+            
+            # Get schema analysis
+            schema_analysis = self._analyze_schema_relationships(schema_info)
+            indexed_cols = schema_analysis.get("indexed_columns", {})
+            relationships = schema_analysis.get("relationships", {})
+            primary_keys = schema_analysis.get("primary_keys", {})
+            
+            # Log available optimization metadata
+            if indexed_cols:
+                logger.info(f"📊 Available indexes: {list(indexed_cols.keys())[:5]} tables have indexes")
+            if relationships:
+                logger.info(f"🔗 Available relationships: {len(relationships)} foreign keys found")
+            if primary_keys:
+                logger.info(f"🔑 Primary keys available for: {list(primary_keys.keys())[:5]}")
+            
+            # Check if WHERE clause uses indexed columns
+            if "WHERE" in base_query.upper():
+                where_match = re.search(r'WHERE\s+(.+?)(?:ORDER BY|GROUP BY|HAVING|$)', base_query, re.IGNORECASE | re.DOTALL)
+                if where_match:
+                    where_clause = where_match.group(1)
+                    
+                    # Check each table's indexed columns
+                    for table_name, idx_cols in indexed_cols.items():
+                        if table_name in base_query:
+                            for col in idx_cols:
+                                if col in where_clause:
+                                    logger.info(f"✅ Query uses indexed column: {table_name}.{col} - good for performance!")
+                                    
+            # Suggest JOIN optimization based on relationships
+            if "students" in prompt.lower() and "applications" in prompt.lower():
+                if "Students.Id" in relationships or any("StudentId" in k for k in relationships.keys()):
+                    logger.info("💡 Using foreign key relationship for Students-Applications JOIN")
+                    
+            # Use enum mappings if available
+            if hasattr(self, '_load_enum_mappings'):
+                try:
+                    enum_mappings = self._load_enum_mappings(connection_id)
+                    if enum_mappings:
+                        # Replace text values with enum numeric values
+                        for enum_name, values in enum_mappings.items():
+                            for text_val, num_val in values.items():
+                                if text_val.lower() in prompt.lower():
+                                    # Replace in query
+                                    base_query = re.sub(
+                                        rf"=\s*['\"]?{re.escape(text_val)}['\"]?",
+                                        f"= {num_val}",
+                                        base_query,
+                                        flags=re.IGNORECASE
+                                    )
+                                    logger.info(f"📊 Enum optimization: {text_val} -> {num_val} ({enum_name})")
+                except Exception as e:
+                    logger.debug(f"Could not load enums: {e}")
+                    
+            return base_query
+            
+        except Exception as e:
+            logger.warning(f"Could not enhance query with metadata: {e}")
+            return base_query
+    
     def _pattern_match_sql(self, prompt: str, schema_info: Dict[str, Any], connection_id: int = 1) -> Optional[str]:
         """Enhanced pattern matching with schema awareness and column intelligence"""
         prompt_lower = prompt.lower().strip()
@@ -812,7 +942,8 @@ class OptimizedRAGService:
                 prompt, semantic_analysis, schema_info)
             if location_query:
                 logger.info("🎯 Column Intelligence: Generated location-aware query")
-                return location_query
+                # Enhance with metadata before returning
+                return self._enhance_query_with_metadata(location_query, prompt, schema_info, connection_id)
         
         # Load dynamic enum mappings
         enum_mappings = self._load_enum_mappings(connection_id)
@@ -997,7 +1128,7 @@ class OptimizedRAGService:
             return fallback_result
         
         # Pattern: count students by application status with totals
-        if all(word in prompt_lower for word in ["count", "student"]) and ("status" in prompt_lower or "application" in prompt_lower) and any(word in prompt_lower for word in ["group", "by", "each", "breakdown", "total"]):
+        if "count" in prompt_lower and ("student" in prompt_lower or "students" in prompt_lower) and ("status" in prompt_lower or "application" in prompt_lower) and any(word in prompt_lower for word in ["group", "by", "each", "breakdown", "total"]):
             logger.info("🎯 Pattern matched: count students grouped by application status with total")
             # Build CASE statement for status text - use primary names only
             primary_statuses = {
@@ -1026,19 +1157,24 @@ GROUP BY GROUPING SETS ((sa.Status), ())
 ORDER BY GROUPING(sa.Status), sa.Status"""
         
         # Pattern: count students with specific application status
-        if all(word in prompt_lower for word in ["count", "student", "application"]) and any(status in prompt_lower for status in status_mappings.keys()):
+        # Handle both singular "student" and plural "students"
+        logger.info(f"🔍 Checking for status pattern. Status mappings: {status_mappings}")
+        logger.info(f"🔍 Status keys in prompt? {[status for status in status_mappings.keys() if status in prompt_lower]}")
+        
+        if "count" in prompt_lower and ("student" in prompt_lower or "students" in prompt_lower) and "application" in prompt_lower and any(status in prompt_lower for status in status_mappings.keys()):
+            logger.info(f"✅ Status pattern conditions met!")
             for status_text, status_value in status_mappings.items():
                 if status_text in prompt_lower:
-                    logger.info(f"🎯 Pattern matched: count students with application status {status_text}")
+                    logger.info(f"🎯 Pattern matched: count students with application status {status_text} (value={status_value})")
                     return f"SELECT COUNT(DISTINCT s.Id) AS total FROM Students s WITH (NOLOCK) INNER JOIN ScholarshipApplications sa WITH (NOLOCK) ON s.Id = sa.StudentId WHERE sa.Status = {status_value}"
         
         # Pattern: count students with applications (any status)
-        if all(word in prompt_lower for word in ["count", "student", "application"]):
+        if "count" in prompt_lower and ("student" in prompt_lower or "students" in prompt_lower) and "application" in prompt_lower:
             logger.info("🎯 Pattern matched: count students with applications")
             return "SELECT COUNT(DISTINCT s.Id) AS total FROM Students s WITH (NOLOCK) INNER JOIN ScholarshipApplications sa WITH (NOLOCK) ON s.Id = sa.StudentId"
         
         # Pattern: show students with specific application status
-        if "show" in prompt_lower and "student" in prompt_lower and "application" in prompt_lower and any(status in prompt_lower for status in status_mappings.keys()):
+        if "show" in prompt_lower and ("student" in prompt_lower or "students" in prompt_lower) and "application" in prompt_lower and any(status in prompt_lower for status in status_mappings.keys()):
             # Try to extract a number from the prompt
             numbers = re.findall(r'\d+', prompt_lower)
             limit = int(numbers[0]) if numbers else 100
@@ -1049,7 +1185,7 @@ ORDER BY GROUPING(sa.Status), sa.Status"""
                     return f"SELECT TOP {limit} s.*, sa.Status FROM Students s WITH (NOLOCK) INNER JOIN ScholarshipApplications sa WITH (NOLOCK) ON s.Id = sa.StudentId WHERE sa.Status = {status_value}"
         
         # Pattern: show N students (e.g., "show 5 students", "show first 10 students")
-        if ("show" in prompt_lower or "first" in prompt_lower or "top" in prompt_lower) and "student" in prompt_lower and "application" not in prompt_lower:
+        if ("show" in prompt_lower or "first" in prompt_lower or "top" in prompt_lower) and ("student" in prompt_lower or "students" in prompt_lower) and "application" not in prompt_lower:
             # Try to extract a number from the prompt
             numbers = re.findall(r'\d+', prompt_lower)
             if numbers:
@@ -1062,14 +1198,27 @@ ORDER BY GROUPING(sa.Status), sa.Status"""
         
         
         # Check for StudentRecommendeds FIRST before generic detection
-        if "count" in prompt_lower and "student" in prompt_lower and ("recommended" in prompt_lower or "recommendeds" in prompt_lower):
+        if "count" in prompt_lower and ("student" in prompt_lower or "students" in prompt_lower) and ("recommended" in prompt_lower or "recommendeds" in prompt_lower):
             logger.info("🎯 Pattern matched: count student recommendeds")
             return "SELECT COUNT(*) AS total FROM StudentRecommendeds WITH (NOLOCK)"
         
+        # Check for ScholarshipApplications BEFORE generic detection (use plural - has data)
+        if "count" in prompt_lower and (("scholarship" in prompt_lower and "application" in prompt_lower) or "scholarshipapplication" in prompt_lower):
+            logger.info("🎯 Pattern matched: count scholarship applications (using ScholarshipApplications plural)")
+            return "SELECT COUNT(*) AS total FROM ScholarshipApplications WITH (NOLOCK)"
+        
         # Generic table count detection - check for table names in the prompt
         if "count" in prompt_lower and schema_info and "tables" in schema_info:
+            # Identify standalone/irrelevant tables to skip
+            standalone_tables = self._identify_standalone_tables(schema_info)
+            
             # Check each table name against the prompt
             for table_name in schema_info.get("tables", {}).keys():
+                # Skip standalone tables unless explicitly mentioned
+                if table_name in standalone_tables:
+                    # Only match if table is explicitly named in prompt
+                    if table_name.lower() not in prompt_lower:
+                        continue
                 table_lower = table_name.lower()
                 
                 # Create variations for matching
@@ -1110,6 +1259,11 @@ ORDER BY GROUPING(sa.Status), sa.Status"""
                 
                 for variation in unique_variations:
                     if variation in prompt_lower:
+                        # Special case: ScholarshipApplication vs ScholarshipApplications - prefer plural (has data)
+                        if table_name == "ScholarshipApplication" and "scholarship" in prompt_lower and "application" in prompt_lower:
+                            # Skip singular, let plural match instead
+                            continue
+                        
                         # Special case: StudentRecommendeds should match if "recommendeds" is mentioned
                         if table_name == "StudentRecommendeds" and ("recommended" in prompt_lower or "recommendeds" in prompt_lower):
                             logger.info(f"🎯 Generic pattern matched: count {table_name} (matched: '{variation}')")
@@ -1177,6 +1331,16 @@ ORDER BY GROUPING(sa.Status), sa.Status"""
         metadata = {"method": "unknown", "cached": False, "performance": {}}
         
         try:
+            # Check if the prompt is already raw SQL
+            prompt_upper = prompt.strip().upper()
+            if any(prompt_upper.startswith(keyword) for keyword in ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'CREATE', 'DROP', 'ALTER']):
+                logger.info("🎯 OptimizedRAG: Raw SQL detected, passing through directly")
+                metadata.update({
+                    "method": "raw_sql_passthrough",
+                    "result_type": "table"
+                })
+                return prompt.strip(), metadata
+            
             # Step 1: Fast pattern matching (< 1ms)
             pattern_start = time.time()
             pattern_sql = self._pattern_match_sql(prompt, schema_info or {}, connection_id or 1)
