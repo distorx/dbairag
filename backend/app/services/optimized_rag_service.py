@@ -13,6 +13,7 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough
 from ..config import settings
 from .query_optimizer_service import query_optimizer
+from .database_vocabulary_service import get_vocabulary_service
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +47,7 @@ class OptimizedRAGService:
         self.llm = None
         self.performance_metrics = {}
         self.column_intelligence = None
+        self.vocabulary_service = None
         
         # Initialize column intelligence service
         try:
@@ -54,6 +56,13 @@ class OptimizedRAGService:
             logger.info("✅ OptimizedRAGService: Column Intelligence Service initialized")
         except ImportError:
             logger.warning("⚠️ OptimizedRAGService: Column Intelligence Service not available")
+        
+        # Initialize vocabulary service
+        try:
+            self.vocabulary_service = get_vocabulary_service()
+            logger.info("✅ OptimizedRAGService: Database Vocabulary Service initialized")
+        except Exception as e:
+            logger.warning(f"⚠️ OptimizedRAGService: Database Vocabulary Service not available: {e}")
     
     def _identify_standalone_tables(self, schema_info: Dict[str, Any]) -> set:
         """Identify tables that are standalone (no relationships, no indexes, likely irrelevant)"""
@@ -730,23 +739,152 @@ class OptimizedRAGService:
         
         return base_query
     
+    def _generate_vocabulary_based_query(self, prompt_lower: str, original_prompt: str = None) -> Optional[str]:
+        """Generate SQL using database vocabulary service for improved pattern matching"""
+        
+        if not self.vocabulary_service:
+            return None
+        
+        # Extract potential column references using vocabulary
+        words = prompt_lower.split()
+        detected_columns = []
+        detected_enums = {}
+        detected_locations = []
+        
+        # Check for multi-word column names (e.g., "mobile phone", "identification number")
+        for i in range(len(words)):
+            # Check 3-word phrases
+            if i + 2 < len(words):
+                phrase = " ".join(words[i:i+3])
+                column = self.vocabulary_service.find_column_by_natural_language(phrase)
+                if column:
+                    detected_columns.append((phrase, column))
+            
+            # Check 2-word phrases  
+            if i + 1 < len(words):
+                phrase = " ".join(words[i:i+2])
+                column = self.vocabulary_service.find_column_by_natural_language(phrase)
+                if column:
+                    detected_columns.append((phrase, column))
+            
+            # Check single words
+            column = self.vocabulary_service.find_column_by_natural_language(words[i])
+            if column:
+                detected_columns.append((words[i], column))
+            
+            # Check for locations
+            is_loc, loc_type = self.vocabulary_service.is_location(words[i])
+            if is_loc:
+                detected_locations.append((words[i], loc_type))
+        
+        # Check for enum values in the query
+        for field in ["Status", "DocumentType", "Relationship"]:
+            for word in words:
+                enum_val = self.vocabulary_service.get_enum_value(field, word)
+                if enum_val:
+                    detected_enums[field] = (word, enum_val)
+        
+        # Pattern: Count students with/without specific columns
+        if any(student_word in prompt_lower for student_word in ["student", "students", "stdent", "studet", "studnt"]):
+            
+            # Check for specific column queries
+            for phrase, column in detected_columns:
+                if phrase in prompt_lower:
+                    # Check for specific values first (e.g., SSN = '000-00-0000', ID = 'ABC123')
+                    if column == "SSN":
+                        # Check for specific SSN value pattern
+                        ssn_pattern = re.findall(r'\b\d{3}[-]?\d{2}[-]?\d{4}\b', original_prompt or prompt_lower)
+                        if ssn_pattern:
+                            ssn_value = ssn_pattern[0]
+                            logger.info(f"🎯 Vocabulary pattern: Students with specific SSN {ssn_value}")
+                            return f"SELECT COUNT(*) AS total FROM Students WITH (NOLOCK) WHERE SSN = '{ssn_value}'"
+                    elif column == "IdentificationNumber":
+                        # Check for specific ID number value pattern
+                        id_patterns = re.findall(r'\b[A-Z0-9]{6,15}\b', original_prompt or prompt_lower.upper())
+                        if id_patterns:
+                            id_value = id_patterns[0]
+                            logger.info(f"🎯 Vocabulary pattern: Students with specific ID {id_value}")
+                            return f"SELECT COUNT(*) AS total FROM Students WITH (NOLOCK) WHERE IdentificationNumber = '{id_value}'"
+                    
+                    # Determine if query is for presence or absence
+                    if "without" in prompt_lower or "no " in prompt_lower or "missing" in prompt_lower:
+                        logger.info(f"🎯 Vocabulary pattern: Students without {column}")
+                        return f"SELECT COUNT(*) AS total FROM Students WITH (NOLOCK) WHERE {column} IS NULL OR {column} = ''"
+                    elif "with" in prompt_lower or "have" in prompt_lower or "has" in prompt_lower:
+                        logger.info(f"🎯 Vocabulary pattern: Students with {column}")
+                        return f"SELECT COUNT(*) AS total FROM Students WITH (NOLOCK) WHERE {column} IS NOT NULL AND {column} != ''"
+            
+            # Check for location-based queries
+            if detected_locations:
+                location, loc_type = detected_locations[0]
+                logger.info(f"🎯 Vocabulary pattern: Students from {location} ({loc_type})")
+                
+                # Use proper column based on location type
+                if loc_type == "city":
+                    return f"""SELECT COUNT(DISTINCT s.StudentID) AS total 
+                              FROM Students s WITH (NOLOCK) 
+                              LEFT JOIN Cities c1 WITH (NOLOCK) ON s.CityIdPhysical = c1.CityID 
+                              LEFT JOIN Cities c2 WITH (NOLOCK) ON s.CityIdPostal = c2.CityID 
+                              WHERE c1.CityName COLLATE Latin1_General_CI_AI LIKE '%{location}%' 
+                                 OR c2.CityName COLLATE Latin1_General_CI_AI LIKE '%{location}%'"""
+                elif loc_type == "state":
+                    return f"""SELECT COUNT(DISTINCT s.StudentID) AS total 
+                              FROM Students s WITH (NOLOCK) 
+                              LEFT JOIN States st1 WITH (NOLOCK) ON s.StateIdPhysical = st1.StateID 
+                              LEFT JOIN States st2 WITH (NOLOCK) ON s.StateIdPostal = st2.StateID 
+                              WHERE st1.StateName COLLATE Latin1_General_CI_AI LIKE '%{location}%' 
+                                 OR st2.StateName COLLATE Latin1_General_CI_AI LIKE '%{location}%'"""
+        
+        # Pattern: Application status queries using enum values
+        if "application" in prompt_lower and detected_enums.get("Status"):
+            text, value = detected_enums["Status"]
+            logger.info(f"🎯 Vocabulary pattern: Applications with status {text} (value={value})")
+            return f"SELECT COUNT(*) AS total FROM ScholarshipApplications WITH (NOLOCK) WHERE Status = {value}"
+        
+        # Pattern: Document type queries using enum values
+        if "document" in prompt_lower and detected_enums.get("DocumentType"):
+            text, value = detected_enums["DocumentType"]
+            logger.info(f"🎯 Vocabulary pattern: Documents of type {text} (value={value})")
+            return f"SELECT COUNT(*) AS total FROM Documents WITH (NOLOCK) WHERE DocumentType = {value}"
+        
+        # Pattern: Family member queries using enum values
+        if "family" in prompt_lower and detected_enums.get("Relationship"):
+            text, value = detected_enums["Relationship"]
+            logger.info(f"🎯 Vocabulary pattern: Family members with relationship {text} (value={value})")
+            return f"SELECT COUNT(*) AS total FROM FamilyMembers WITH (NOLOCK) WHERE Relationship = {value}"
+        
+        return None
+    
     def _generate_fallback_patterns(self, prompt_lower: str, original_prompt: str = None) -> Optional[str]:
         """Generate common patterns without requiring full schema analysis"""
         
-        # Pattern: Age-based queries (common column names)
-        if "student" in prompt_lower and "age" in prompt_lower and any(op in prompt_lower for op in ["greater", "more", "older", ">", "above"]):
+        # Pattern: Age-based queries (calculate from DateOfBirth)
+        if "student" in prompt_lower and ("age" in prompt_lower or "older" in prompt_lower or "younger" in prompt_lower):
             numbers = re.findall(r'\d+', prompt_lower)
             if numbers:
                 age = numbers[0]
-                logger.info(f"🎯 Fallback pattern: Students older than {age}")
-                return f"SELECT COUNT(*) AS total FROM Students WITH (NOLOCK) WHERE Age > {age}"
-        
-        if "student" in prompt_lower and "age" in prompt_lower and any(op in prompt_lower for op in ["less", "fewer", "younger", "<", "under"]):
-            numbers = re.findall(r'\d+', prompt_lower)
-            if numbers:
-                age = numbers[0]
-                logger.info(f"🎯 Fallback pattern: Students younger than {age}")
-                return f"SELECT COUNT(*) AS total FROM Students WITH (NOLOCK) WHERE Age < {age}"
+                
+                # Check for greater than operations (older than)
+                if any(op in prompt_lower for op in ["older than", "age greater", "age more", "age >", "age above"]):
+                    logger.info(f"🎯 Fallback pattern: Students older than {age}")
+                    return f"""SELECT COUNT(*) AS total 
+                              FROM Students WITH (NOLOCK) 
+                              WHERE DATEDIFF(YEAR, DateOfBirth, GETDATE()) > {age}"""
+                
+                # Check for less than operations (younger than)
+                elif any(op in prompt_lower for op in ["younger than", "age less", "age fewer", "age <", "age under"]):
+                    logger.info(f"🎯 Fallback pattern: Students younger than {age}")
+                    return f"""SELECT COUNT(*) AS total 
+                              FROM Students WITH (NOLOCK) 
+                              WHERE DATEDIFF(YEAR, DateOfBirth, GETDATE()) < {age}"""
+                
+                # Check for exact age match (must be last to not catch "older than" or "younger than")
+                elif "with age" in prompt_lower or "age is" in prompt_lower or f"age {age}" in prompt_lower:
+                    logger.info(f"🎯 Fallback pattern: Students with age {age}")
+                    # Calculate age using DATEDIFF from DateOfBirth
+                    return f"""SELECT COUNT(*) AS total 
+                              FROM Students WITH (NOLOCK) 
+                              WHERE DATEDIFF(YEAR, DateOfBirth, GETDATE()) = {age}"""
         
         # Pattern: GPA-based queries
         if "student" in prompt_lower and "gpa" in prompt_lower and any(op in prompt_lower for op in ["greater", "more", "above", ">", "higher"]):
@@ -807,6 +945,57 @@ class OptimizedRAGService:
                 else:
                     logger.info(f"🎯 Fallback pattern: Students from {year}")
                     return f"SELECT COUNT(*) AS total FROM Students WITH (NOLOCK) WHERE YEAR(CreatedAt) = {year}"
+        
+        # Pattern: Identification number queries (ID number, not SSN)
+        # Also handles common typos like "stdent" instead of "student"
+        if any(student_word in prompt_lower for student_word in ["student", "stdent", "studet", "studnt"]) and any(id_word in prompt_lower for id_word in ["identification number", "identification", "id number", "ident"]):
+            # Check for specific ID number value
+            # Look for alphanumeric patterns that could be ID numbers
+            id_patterns = re.findall(r'\b[A-Z0-9]{6,15}\b', original_prompt or prompt_lower.upper())
+            if id_patterns:
+                id_value = id_patterns[0]
+                logger.info(f"🎯 Pattern: Students with specific identification number {id_value}")
+                return f"SELECT COUNT(*) AS total FROM Students WITH (NOLOCK) WHERE IdentificationNumber = '{id_value}'"
+            elif "without" in prompt_lower or "no " in prompt_lower or "missing" in prompt_lower:
+                logger.info(f"🎯 Pattern: Students WITHOUT identification number")
+                return f"SELECT COUNT(*) AS total FROM Students WITH (NOLOCK) WHERE IdentificationNumber IS NULL OR IdentificationNumber = ''"
+            else:
+                logger.info(f"🎯 Pattern: Students WITH identification number")
+                return f"SELECT COUNT(*) AS total FROM Students WITH (NOLOCK) WHERE IdentificationNumber IS NOT NULL AND IdentificationNumber != ''"
+        
+        # Pattern: Social Security Number (SSN) queries
+        if "student" in prompt_lower and any(ssn_word in prompt_lower for ssn_word in ["ssn", "social security", "social security number"]):
+            # Check for specific SSN value (like 000-00-0000 or 000000000)
+            # Look for pattern with digits and optional dashes
+            ssn_pattern = re.findall(r'\b\d{3}[-]?\d{2}[-]?\d{4}\b', prompt_lower)
+            if ssn_pattern:
+                ssn_value = ssn_pattern[0]
+                logger.info(f"🎯 Pattern: Students with specific SSN {ssn_value}")
+                return f"SELECT COUNT(*) AS total FROM Students WITH (NOLOCK) WHERE SSN = '{ssn_value}'"
+            elif "without" in prompt_lower or "no " in prompt_lower or "missing" in prompt_lower:
+                logger.info(f"🎯 Pattern: Students WITHOUT SSN")
+                return f"SELECT COUNT(*) AS total FROM Students WITH (NOLOCK) WHERE SSN IS NULL OR SSN = ''"
+            else:
+                logger.info(f"🎯 Pattern: Students WITH SSN")
+                return f"SELECT COUNT(*) AS total FROM Students WITH (NOLOCK) WHERE SSN IS NOT NULL AND SSN != ''"
+        
+        # Pattern: Mobile Phone queries  
+        if "student" in prompt_lower and any(phone_word in prompt_lower for phone_word in ["mobile phone", "mobile", "cell phone", "cell"]):
+            if "without" in prompt_lower or "no " in prompt_lower or "missing" in prompt_lower:
+                logger.info(f"🎯 Pattern: Students WITHOUT mobile phone")
+                return f"SELECT COUNT(*) AS total FROM Students WITH (NOLOCK) WHERE MobilePhone IS NULL OR MobilePhone = ''"
+            else:
+                logger.info(f"🎯 Pattern: Students WITH mobile phone")
+                return f"SELECT COUNT(*) AS total FROM Students WITH (NOLOCK) WHERE MobilePhone IS NOT NULL AND MobilePhone != ''"
+        
+        # Pattern: Home Phone queries
+        if "student" in prompt_lower and "home phone" in prompt_lower:
+            if "without" in prompt_lower or "no " in prompt_lower or "missing" in prompt_lower:
+                logger.info(f"🎯 Pattern: Students WITHOUT home phone")
+                return f"SELECT COUNT(*) AS total FROM Students WITH (NOLOCK) WHERE HomePhone IS NULL OR HomePhone = ''"
+            else:
+                logger.info(f"🎯 Pattern: Students WITH home phone")
+                return f"SELECT COUNT(*) AS total FROM Students WITH (NOLOCK) WHERE HomePhone IS NOT NULL AND HomePhone != ''"
         
         # Pattern: Status-based queries with smart matching
         if "student" in prompt_lower and "status" in prompt_lower:
@@ -945,6 +1134,12 @@ class OptimizedRAGService:
                 logger.info("🎯 Column Intelligence: Generated location-aware query")
                 # Enhance with metadata before returning
                 return self._enhance_query_with_metadata(location_query, prompt, schema_info, connection_id)
+        
+        # Try vocabulary-based query generation (NEW)
+        vocabulary_result = self._generate_vocabulary_based_query(prompt_lower, prompt)
+        if vocabulary_result:
+            logger.info("🎯 Vocabulary Service: Generated query using database vocabulary")
+            return self._generate_index_optimized_query(vocabulary_result, "Students", schema_analysis)
         
         # Load dynamic enum mappings
         enum_mappings = self._load_enum_mappings(connection_id)
@@ -1313,8 +1508,13 @@ ORDER BY GROUPING(sa.Status), sa.Status"""
                 logger.info("🎯 Pattern matched: count student recommendeds")
                 return "SELECT COUNT(*) AS total FROM StudentRecommendeds WITH (NOLOCK)"
             
+            # Check for students with specific criteria BEFORE generic student count
+            # This prevents "count students with X" from matching the generic pattern
+            if "student" in prompt_lower and " with " in prompt_lower:
+                # Don't match here - let it fall through to more specific patterns
+                pass
             # Only match Students if "student" is explicitly mentioned and not recommendeds
-            if "student" in prompt_lower and "application" not in prompt_lower and "recommended" not in prompt_lower:
+            elif "student" in prompt_lower and "application" not in prompt_lower and "recommended" not in prompt_lower:
                 logger.info("🎯 Pattern matched: count total students")
                 return "SELECT COUNT(*) AS total FROM Students WITH (NOLOCK)"
         

@@ -1,0 +1,162 @@
+<div class="vocabulary-insights-container">
+  <!-- Toggle Button -->
+  <button 
+    (click)="toggleInsights()" 
+    class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded mb-4">
+    {{ showInsights ? 'Hide' : 'Show' }} Vocabulary Insights
+  </button>
+
+  <!-- Main Insights Panel -->
+  <div *ngIf="showInsights" class="insights-panel bg-white rounded-lg shadow-md p-4">
+    
+    <!-- Vocabulary Stats -->
+    <div *ngIf="vocabularyStats" class="stats-section mb-6">
+      <h3 class="text-lg font-semibold mb-2">📊 Vocabulary Statistics</h3>
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
+        <div class="stat-item">
+          <span class="font-medium">Tables:</span> {{ vocabularyStats.tables?.length || 0 }}
+        </div>
+        <div class="stat-item">
+          <span class="font-medium">Columns:</span> {{ vocabularyStats.total_columns || 0 }}
+        </div>
+        <div class="stat-item">
+          <span class="font-medium">Enums:</span> {{ vocabularyStats.total_enums || 0 }}
+        </div>
+        <div class="stat-item">
+          <span class="font-medium">Cities:</span> {{ vocabularyStats.total_cities || 0 }}
+        </div>
+      </div>
+    </div>
+
+    <!-- Query Input with Suggestions -->
+    <div class="query-section mb-6">
+      <h3 class="text-lg font-semibold mb-2">🔍 Query Helper</h3>
+      <input 
+        type="text" 
+        [(ngModel)]="currentQuery"
+        (ngModelChange)="onQueryChange($event)"
+        placeholder="Type your query here..."
+        class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+      
+      <!-- Suggestions Dropdown -->
+      <div *ngIf="suggestions.length > 0" class="suggestions-dropdown mt-2 bg-white border border-gray-200 rounded-md shadow-lg">
+        <div *ngFor="let suggestion of suggestions" 
+             (click)="applySuggestion(suggestion)"
+             class="suggestion-item px-3 py-2 hover:bg-gray-100 cursor-pointer">
+          <span [ngSwitch]="suggestion.type" class="inline-block mr-2">
+            <span *ngSwitchCase="'column'" class="text-blue-500">📋</span>
+            <span *ngSwitchCase="'enum'" class="text-green-500">🔢</span>
+            <span *ngSwitchCase="'location'" class="text-orange-500">📍</span>
+          </span>
+          {{ suggestion.text }}
+        </div>
+      </div>
+    </div>
+
+    <!-- Parsed Query Display -->
+    <div *ngIf="parsedQuery" class="parsed-section mb-6">
+      <h3 class="text-lg font-semibold mb-2">🎯 Detected Elements</h3>
+      
+      <!-- Detected Columns -->
+      <div *ngIf="parsedQuery.columns.length > 0" class="mb-3">
+        <h4 class="text-sm font-medium text-gray-600 mb-1">Columns:</h4>
+        <div class="flex flex-wrap gap-2">
+          <span *ngFor="let col of parsedQuery.columns" 
+                class="inline-block bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded">
+            "{{ col.phrase }}" → {{ col.column }}
+          </span>
+        </div>
+      </div>
+      
+      <!-- Detected Enums -->
+      <div *ngIf="parsedQuery.enums.length > 0" class="mb-3">
+        <h4 class="text-sm font-medium text-gray-600 mb-1">Enum Values:</h4>
+        <div class="flex flex-wrap gap-2">
+          <span *ngFor="let enum of parsedQuery.enums" 
+                class="inline-block bg-green-100 text-green-800 text-xs px-2 py-1 rounded">
+            {{ enum.field }}: "{{ enum.word }}" = {{ enum.value }}
+          </span>
+        </div>
+      </div>
+      
+      <!-- Detected Locations -->
+      <div *ngIf="parsedQuery.locations.length > 0" class="mb-3">
+        <h4 class="text-sm font-medium text-gray-600 mb-1">Locations:</h4>
+        <div class="flex flex-wrap gap-2">
+          <span *ngFor="let loc of parsedQuery.locations" 
+                class="inline-block bg-orange-100 text-orange-800 text-xs px-2 py-1 rounded">
+            {{ loc.word }} ({{ loc.type }})
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Reference Tables -->
+    <div class="reference-section">
+      <h3 class="text-lg font-semibold mb-2">📚 Quick Reference</h3>
+      
+      <!-- Tabs -->
+      <div class="tabs mb-4">
+        <button 
+          (click)="activeTab = 'columns'"
+          [class.active]="activeTab === 'columns'"
+          class="tab-button px-3 py-1 mr-2 rounded"
+          [ngClass]="{'bg-blue-500 text-white': activeTab === 'columns', 'bg-gray-200': activeTab !== 'columns'}">
+          Columns
+        </button>
+        <button 
+          (click)="activeTab = 'enums'"
+          [class.active]="activeTab === 'enums'"
+          class="tab-button px-3 py-1 mr-2 rounded"
+          [ngClass]="{'bg-blue-500 text-white': activeTab === 'enums', 'bg-gray-200': activeTab !== 'enums'}">
+          Enums
+        </button>
+        <button 
+          (click)="activeTab = 'locations'"
+          [class.active]="activeTab === 'locations'"
+          class="tab-button px-3 py-1 rounded"
+          [ngClass]="{'bg-blue-500 text-white': activeTab === 'locations', 'bg-gray-200': activeTab !== 'locations'}">
+          Locations
+        </button>
+      </div>
+      
+      <!-- Tab Content -->
+      <div class="tab-content bg-gray-50 p-3 rounded">
+        <!-- Columns Tab -->
+        <div *ngIf="activeTab === 'columns'" class="columns-tab">
+          <h4 class="text-sm font-medium mb-2">Natural Language → Database Column</h4>
+          <div class="text-xs space-y-1">
+            <div *ngFor="let mapping of sampleColumnMappings" class="flex">
+              <span class="text-gray-600 w-1/2">"{{ mapping.natural }}"</span>
+              <span class="text-gray-800 font-mono">→ {{ mapping.column }}</span>
+            </div>
+          </div>
+        </div>
+        
+        <!-- Enums Tab -->
+        <div *ngIf="activeTab === 'enums'" class="enums-tab">
+          <div *ngFor="let enumEntry of getEnumEntries(sampleEnums)" class="mb-3">
+            <h4 class="text-sm font-medium mb-1">{{ enumEntry.key }}</h4>
+            <div class="text-xs space-y-1">
+              <div *ngFor="let valueEntry of getEnumEntries(enumEntry.value)" class="flex">
+                <span class="text-gray-600 w-1/2">"{{ valueEntry.key }}"</span>
+                <span class="text-gray-800 font-mono">= {{ valueEntry.value }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <!-- Locations Tab -->
+        <div *ngIf="activeTab === 'locations'" class="locations-tab">
+          <h4 class="text-sm font-medium mb-2">Sample Cities</h4>
+          <div class="flex flex-wrap gap-2">
+            <span *ngFor="let city of sampleLocations" 
+                  class="inline-block bg-gray-200 text-gray-700 text-xs px-2 py-1 rounded">
+              {{ city }}
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

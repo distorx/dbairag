@@ -12,6 +12,7 @@ export interface Cell {
   execution_time?: number;
   created_at: Date;
   isExecuting?: boolean;
+  metadata?: any;  // Add metadata field for pattern matching info
 }
 
 export interface NotebookSession {
@@ -80,7 +81,8 @@ export class NotebookService {
     content: string,
     result_type: 'text' | 'table' | 'error',
     result_data: any,
-    execution_time?: number
+    execution_time?: number,
+    metadata?: any
   ): Cell {
     const cell: Cell = {
       id: uuidv4(),
@@ -89,6 +91,7 @@ export class NotebookService {
       result_type,
       result_data,
       execution_time,
+      metadata,
       created_at: new Date()
     };
     

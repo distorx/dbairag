@@ -58,10 +58,15 @@ ModuleRegistry.registerModules([AllCommunityModule]);
               <pre class="bg-gray-100 p-2 rounded text-xs whitespace-pre-wrap break-words font-mono">{{ cell.content }}</pre>
             </div>
             
-            <!-- Execution Time and Retry Info -->
+            <!-- Execution Time, Pattern Method, and Retry Info -->
             <div class="flex items-center gap-2 text-xs text-gray-500 mb-2">
               <span *ngIf="cell.execution_time">
                 Executed in {{ cell.execution_time }}ms
+              </span>
+              <span *ngIf="cell.metadata?.method" 
+                    [class]="getMethodBadgeClass(cell.metadata.method)"
+                    class="px-2 py-1 rounded text-xs">
+                {{ getMethodLabel(cell.metadata.method) }}
               </span>
               <span *ngIf="hasRetryInfo()" 
                     class="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">
@@ -659,6 +664,43 @@ export class NotebookCellComponent implements OnChanges, OnInit {
   getMetadataRefreshCount(): number {
     const retryLog = this.getRetryLog();
     return retryLog.filter(attempt => attempt.metadata_refreshed).length;
+  }
+  
+  // Pattern matching method helpers
+  getMethodLabel(method: string): string {
+    if (!method) return '';
+    
+    const methodLabels: { [key: string]: string } = {
+      'pattern_match': '⚡ Pattern Match',
+      'vocabulary_pattern': '📚 Vocabulary Pattern',
+      'column_intelligence': '🧠 Column Intelligence',
+      'dynamic_pattern': '🎯 Dynamic Pattern',
+      'fallback_pattern': '🔄 Fallback Pattern',
+      'llm_generation': '🤖 AI Generated',
+      'raw_sql_passthrough': '📝 Raw SQL',
+      'cached': '💾 Cached',
+      'optimized': '⚙️ Optimized'
+    };
+    
+    return methodLabels[method] || method;
+  }
+  
+  getMethodBadgeClass(method: string): string {
+    if (!method) return '';
+    
+    const methodClasses: { [key: string]: string } = {
+      'pattern_match': 'bg-green-100 text-green-700',
+      'vocabulary_pattern': 'bg-purple-100 text-purple-700',
+      'column_intelligence': 'bg-indigo-100 text-indigo-700',
+      'dynamic_pattern': 'bg-blue-100 text-blue-700',
+      'fallback_pattern': 'bg-yellow-100 text-yellow-700',
+      'llm_generation': 'bg-orange-100 text-orange-700',
+      'raw_sql_passthrough': 'bg-gray-100 text-gray-700',
+      'cached': 'bg-teal-100 text-teal-700',
+      'optimized': 'bg-pink-100 text-pink-700'
+    };
+    
+    return methodClasses[method] || 'bg-gray-100 text-gray-700';
   }
   
   // Table suggestion helper methods

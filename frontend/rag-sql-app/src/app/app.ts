@@ -7,6 +7,7 @@ import { EnumManagerComponent } from './components/enum-manager/enum-manager.com
 import { CacheStatsComponent } from './components/cache-stats/cache-stats.component';
 import { HintsSearchComponent } from './components/hints-search/hints-search.component';
 import { DocumentationViewerComponent } from './components/documentation-viewer/documentation-viewer.component';
+import { VocabularyInsightsComponent } from './components/vocabulary-insights/vocabulary-insights';
 import { NotebookService, Cell } from './services/notebook.service';
 import { ApiService, QueryHint, Suggestion } from './services/api.service';
 import { StorageService } from './services/storage.service';
@@ -21,7 +22,8 @@ import { StorageService } from './services/storage.service';
     EnumManagerComponent,
     CacheStatsComponent,
     HintsSearchComponent,
-    DocumentationViewerComponent
+    DocumentationViewerComponent,
+    VocabularyInsightsComponent
   ],
   template: `
     <div class="min-h-screen bg-gradient-to-br from-slate-50 via-white to-blue-50 flex flex-col">
@@ -100,6 +102,11 @@ import { StorageService } from './services/storage.service';
             (hintSelected)="onHintSelected($event)"
             (suggestionUsed)="onSuggestionUsed($event)">
           </app-hints-search>
+        </div>
+
+        <!-- Vocabulary Insights Component -->
+        <div class="mb-6">
+          <app-vocabulary-insights></app-vocabulary-insights>
         </div>
         
         <!-- Third Row - Tabbed Section -->
@@ -319,13 +326,14 @@ export class AppComponent implements OnInit {
         // Mark cell as not executing
         this.notebookService.updateCell(cell.id, { isExecuting: false });
         
-        // Add response cell
+        // Add response cell with metadata
         this.notebookService.addResponseCell(
           cell.id,
           response.generated_sql || '',
           response.result_type,
           response.result_data,
-          response.execution_time
+          response.execution_time,
+          response.metadata  // Pass metadata for pattern matching info
         );
         
         // Show success notification

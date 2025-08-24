@@ -1,96 +1,80 @@
 #!/usr/bin/env python3
-"""
-Test script to demonstrate counting students by application status with totals
-"""
+"""Test script to verify status filtering in student application queries"""
 
 import requests
 import json
 
 # API endpoint
-API_URL = "http://localhost:8001/api/queries/execute-optimized"
+BASE_URL = "http://localhost:8000/api"
 
-# Test queries for counting students by application status
+# Test queries with different statuses
 test_queries = [
-    {
-        "name": "Basic count by status",
-        "query": "count students by application status"
-    },
-    {
-        "name": "Count with total",
-        "query": "count students by application status with total"
-    },
-    {
-        "name": "Group by with total",
-        "query": "show count of students grouped by application status including total"
-    },
-    {
-        "name": "Detailed with all statuses",
-        "query": "count students for each status draft, submitted, approved, rejected, cancelled and show total"
-    },
-    {
-        "name": "Alternative phrasing",
-        "query": "how many students have each application status and what is the total count"
-    }
+    "count students with application",  # Should return all 305
+    "count students with application rejected",  # Should filter by rejected status (5)
+    "count students with application approved",  # Should filter by approved status (4)
+    "count students with application pending",  # Should filter by pending status (1)
+    "count students with application submitted",  # Should filter by submitted status (2)
 ]
 
-def test_query(query_text, connection_id=1):
-    """Execute a test query and return the result"""
-    payload = {
-        "prompt": query_text,
-        "connection_id": connection_id
-    }
+def test_query(prompt):
+    """Test a single query"""
+    print(f"\n{'='*60}")
+    print(f"Testing: {prompt}")
+    print('='*60)
     
     try:
-        response = requests.post(API_URL, json=payload)
-        response.raise_for_status()
-        result = response.json()
+        response = requests.post(
+            f"{BASE_URL}/queries/execute",
+            json={
+                "connection_id": 1,
+                "prompt": prompt
+            }
+        )
         
-        # Debug print full response
-        print(f"DEBUG - Full response: {json.dumps(result, indent=2)}")
-        
-        return {
-            "success": True,
-            "sql": result.get("generated_sql", result.get("sql_query", "")),
-            "execution_time": result.get("execution_time", 0),
-            "row_count": len(result.get("results", [])) if result.get("results") else 0,
-            "results": result.get("results", [])[:5],  # First 5 rows
-            "full_response": result
-        }
+        if response.status_code == 200:
+            result = response.json()
+            
+            # Show the generated SQL
+            if 'generated_sql' in result:
+                print(f"Generated SQL: {result['generated_sql']}")
+            
+            # Show the result
+            if 'result_data' in result:
+                if isinstance(result['result_data'], dict) and 'data' in result['result_data']:
+                    data = result['result_data']['data']
+                    if data and len(data) > 0:
+                        print(f"Result: {data[0]}")
+                    else:
+                        print("Result: No data returned")
+                else:
+                    print(f"Result: {result['result_data']}")
+            
+            # Check if WHERE clause is present for status queries
+            if 'generated_sql' in result:
+                sql = result['generated_sql']
+                if any(status in prompt.lower() for status in ['rejected', 'approved', 'pending', 'submitted']):
+                    if 'WHERE' in sql and 'Status' in sql:
+                        print("✅ Status filter correctly applied")
+                    else:
+                        print("❌ Status filter NOT applied - query may return incorrect results")
+                        
+        else:
+            print(f"Error: HTTP {response.status_code}")
+            print(response.text)
+            
     except Exception as e:
-        return {
-            "success": False,
-            "error": str(e)
-        }
+        print(f"Error: {e}")
 
 def main():
-    print("=" * 80)
-    print("Testing Student Count by Application Status Queries")
-    print("=" * 80)
-    print()
+    print("Testing RAG SQL Query Status Filtering")
+    print("="*60)
     
-    for test in test_queries:
-        print(f"Test: {test['name']}")
-        print(f"Query: '{test['query']}'")
-        print("-" * 40)
-        
-        result = test_query(test['query'])
-        
-        if result['success']:
-            print(f"✓ Success!")
-            print(f"SQL Generated:")
-            print(f"  {result['sql']}")
-            print(f"Execution Time: {result['execution_time']:.3f}s")
-            print(f"Rows Returned: {result['row_count']}")
-            if result['results']:
-                print("Sample Results:")
-                for row in result['results']:
-                    print(f"  {row}")
-        else:
-            print(f"✗ Error: {result['error']}")
-        
-        print()
-        print("=" * 80)
-        print()
+    # Test each query
+    for query in test_queries:
+        test_query(query)
+    
+    print("\n" + "="*60)
+    print("Test complete!")
 
 if __name__ == "__main__":
     main()

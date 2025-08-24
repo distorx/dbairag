@@ -26,6 +26,7 @@ export interface QueryResponse {
   result_data: any;
   execution_time?: number;
   created_at?: string;
+  metadata?: any;  // Add metadata field for pattern matching info
 }
 
 export interface EnumFile {
@@ -223,5 +224,30 @@ export class ApiService {
   // Test field analysis endpoint with mock data
   getFieldAnalysisTest(connectionId: number): Observable<any> {
     return this.http.get<any>(`${this.apiUrl}/queries/field-analysis/${connectionId}/test`);
+  }
+
+  // Vocabulary Service Endpoints
+  getVocabularyStats(): Observable<any> {
+    return this.http.get<any>(`${this.apiUrl}/queries/vocabulary/stats`);
+  }
+
+  getVocabularyColumns(): Observable<any> {
+    return this.http.get<any>(`${this.apiUrl}/queries/vocabulary/columns`);
+  }
+
+  getVocabularyEnums(): Observable<any> {
+    return this.http.get<any>(`${this.apiUrl}/queries/vocabulary/enums`);
+  }
+
+  getVocabularyLocations(): Observable<any> {
+    return this.http.get<any>(`${this.apiUrl}/queries/vocabulary/locations`);
+  }
+
+  getVocabularySuggestions(query: string): Observable<any> {
+    return this.http.post<any>(`${this.apiUrl}/queries/vocabulary/suggest`, { query });
+  }
+
+  parseWithVocabulary(query: string): Observable<any> {
+    return this.http.post<any>(`${this.apiUrl}/queries/vocabulary/parse`, { query });
   }
 }

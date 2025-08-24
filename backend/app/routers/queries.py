@@ -33,10 +33,14 @@ from ..services.schema_sync_service import SchemaSyncService
 from ..services.query_suggestions_service import QuerySuggestionsService
 from ..services.hints_storage_service import hints_storage
 from ..services.query_optimizer_service import query_optimizer
+from ..services.database_vocabulary_service import get_vocabulary_service
 from ..utils.json_utils import safe_json_dumps
 
 router = APIRouter(prefix="/api/queries", tags=["queries"])
 logger = logging.getLogger(__name__)
+
+# Initialize vocabulary service
+vocabulary_service = get_vocabulary_service()
 
 rag_service = RAGService()
 schema_analyzer = SchemaAnalyzer()
@@ -1769,4 +1773,209 @@ async def analyze_query_plan(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to analyze query plan: {str(e)}"
+        )
+
+@router.get("/vocabulary/stats")
+async def get_vocabulary_stats():
+    """Get vocabulary service statistics"""
+    try:
+        stats = vocabulary_service.get_vocabulary_stats()
+        return {
+            "stats": stats,
+            "timestamp": time.time()
+        }
+    except Exception as e:
+        logger.error(f"Error fetching vocabulary stats: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch vocabulary stats: {str(e)}"
+        )
+
+@router.get("/vocabulary/columns")
+async def get_vocabulary_columns():
+    """Get all column mappings from vocabulary service"""
+    try:
+        return {
+            "columns": dict(vocabulary_service.vocabulary.natural_to_column),
+            "word_mappings": {
+                word: list(columns) 
+                for word, columns in vocabulary_service.vocabulary.word_to_columns.items()
+            },
+            "timestamp": time.time()
+        }
+    except Exception as e:
+        logger.error(f"Error fetching vocabulary columns: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch vocabulary columns: {str(e)}"
+        )
+
+@router.get("/vocabulary/enums")
+async def get_vocabulary_enums():
+    """Get all enum mappings from vocabulary service"""
+    try:
+        return {
+            "enums": {
+                field: dict(values)
+                for field, values in vocabulary_service.vocabulary.enum_text_to_value.items()
+            },
+            "timestamp": time.time()
+        }
+    except Exception as e:
+        logger.error(f"Error fetching vocabulary enums: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch vocabulary enums: {str(e)}"
+        )
+
+@router.get("/vocabulary/locations")
+async def get_vocabulary_locations():
+    """Get all location data from vocabulary service"""
+    try:
+        return {
+            "cities": list(vocabulary_service.vocabulary.cities),
+            "states": list(vocabulary_service.vocabulary.states),
+            "regions": list(vocabulary_service.vocabulary.regions),
+            "timestamp": time.time()
+        }
+    except Exception as e:
+        logger.error(f"Error fetching vocabulary locations: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch vocabulary locations: {str(e)}"
+        )
+
+@router.post("/vocabulary/suggest")
+async def get_vocabulary_suggestions(request: Dict[str, Any]):
+    """Get query suggestions based on partial input using vocabulary"""
+    try:
+        query = request.get("query", "").lower()
+        if not query:
+            return {"suggestions": []}
+        
+        suggestions = []
+        words = query.split()
+        last_word = words[-1] if words else ""
+        
+        # Suggest columns that match the last word
+        for natural_phrase, column in vocabulary_service.vocabulary.natural_to_column.items():
+            if last_word in natural_phrase:
+                suggestion = {
+                    "text": f"students with {natural_phrase}",
+                    "column": column,
+                    "type": "column"
+                }
+                suggestions.append(suggestion)
+        
+        # Suggest enum values
+        for field, values in vocabulary_service.vocabulary.enum_text_to_value.items():
+            for text, value in values.items():
+                if last_word in text:
+                    if field == "Status":
+                        suggestion = {
+                            "text": f"applications with status {text}",
+                            "enum_field": field,
+                            "enum_value": value,
+                            "type": "enum"
+                        }
+                    elif field == "DocumentType":
+                        suggestion = {
+                            "text": f"documents of type {text}",
+                            "enum_field": field,
+                            "enum_value": value,
+                            "type": "enum"
+                        }
+                    elif field == "Relationship":
+                        suggestion = {
+                            "text": f"family members with relationship {text}",
+                            "enum_field": field,
+                            "enum_value": value,
+                            "type": "enum"
+                        }
+                    suggestions.append(suggestion)
+        
+        # Suggest locations
+        for city in vocabulary_service.vocabulary.cities:
+            if last_word in city.lower():
+                suggestion = {
+                    "text": f"students from {city}",
+                    "location": city,
+                    "location_type": "city",
+                    "type": "location"
+                }
+                suggestions.append(suggestion)
+        
+        # Limit suggestions
+        suggestions = suggestions[:10]
+        
+        return {
+            "query": query,
+            "suggestions": suggestions,
+            "timestamp": time.time()
+        }
+    except Exception as e:
+        logger.error(f"Error generating vocabulary suggestions: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate suggestions: {str(e)}"
+        )
+
+@router.post("/vocabulary/parse")
+async def parse_with_vocabulary(request: Dict[str, Any]):
+    """Parse a query using vocabulary service to identify columns, enums, and locations"""
+    try:
+        query = request.get("query", "").lower()
+        
+        # Parse the query
+        words = query.split()
+        detected = {
+            "columns": [],
+            "enums": [],
+            "locations": []
+        }
+        
+        # Check for column references
+        for i in range(len(words)):
+            # Check multi-word phrases
+            for length in [3, 2, 1]:
+                if i + length <= len(words):
+                    phrase = " ".join(words[i:i+length])
+                    column = vocabulary_service.find_column_by_natural_language(phrase)
+                    if column:
+                        detected["columns"].append({
+                            "phrase": phrase,
+                            "column": column,
+                            "position": i
+                        })
+        
+        # Check for enum values
+        for field in ["Status", "DocumentType", "Relationship"]:
+            for word in words:
+                enum_val = vocabulary_service.get_enum_value(field, word)
+                if enum_val:
+                    detected["enums"].append({
+                        "word": word,
+                        "field": field,
+                        "value": enum_val
+                    })
+        
+        # Check for locations
+        for word in words:
+            is_loc, loc_type = vocabulary_service.is_location(word)
+            if is_loc:
+                detected["locations"].append({
+                    "word": word,
+                    "type": loc_type
+                })
+        
+        return {
+            "query": query,
+            "detected": detected,
+            "timestamp": time.time()
+        }
+    except Exception as e:
+        logger.error(f"Error parsing with vocabulary: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to parse query: {str(e)}"
         )
