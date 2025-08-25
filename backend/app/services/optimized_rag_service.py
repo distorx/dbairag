@@ -945,7 +945,40 @@ class OptimizedRAGService:
     def _generate_application_status_patterns(self, prompt_lower: str) -> Optional[str]:
         """Generate patterns for application status queries"""
         
-        # Direct application count queries (no need to join Students table)
+        # Pattern: Count students with applications
+        if "count" in prompt_lower and "student" in prompt_lower and "application" in prompt_lower:
+            # Check for specific statuses
+            if any(word in prompt_lower for word in ["rejected", "reject", "denied"]):
+                logger.info("🎯 Application Pattern: Count students with rejected applications")
+                return """SELECT COUNT(DISTINCT StudentId) AS total 
+                         FROM ScholarshipApplications WITH (NOLOCK) 
+                         WHERE Status = 5"""
+            elif any(word in prompt_lower for word in ["approved", "approve", "accepted"]):
+                logger.info("🎯 Application Pattern: Count students with approved applications")
+                return """SELECT COUNT(DISTINCT StudentId) AS total 
+                         FROM ScholarshipApplications WITH (NOLOCK) 
+                         WHERE Status = 3"""
+            elif any(word in prompt_lower for word in ["pending", "waiting", "review"]):
+                logger.info("🎯 Application Pattern: Count students with pending applications")
+                return """SELECT COUNT(DISTINCT StudentId) AS total 
+                         FROM ScholarshipApplications WITH (NOLOCK) 
+                         WHERE Status = 1"""
+            elif any(word in prompt_lower for word in ["submitted", "submit"]):
+                logger.info("🎯 Application Pattern: Count students with submitted applications")
+                return """SELECT COUNT(DISTINCT StudentId) AS total 
+                         FROM ScholarshipApplications WITH (NOLOCK) 
+                         WHERE Status = 2"""
+            else:
+                # Count all students with any application
+                logger.info("🎯 Application Pattern: Count all students with applications")
+                return "SELECT COUNT(DISTINCT StudentId) AS total FROM ScholarshipApplications WITH (NOLOCK)"
+        
+        # Pattern: How many students applied
+        if any(phrase in prompt_lower for phrase in ["how many students applied", "students applied", "students who applied"]):
+            logger.info("🎯 Application Pattern: Count students who applied")
+            return "SELECT COUNT(DISTINCT StudentId) AS total FROM ScholarshipApplications WITH (NOLOCK)"
+        
+        # Direct application count queries (no student reference)
         if "count" in prompt_lower and "application" in prompt_lower and "student" not in prompt_lower:
             # Check for rejected applications
             if any(word in prompt_lower for word in ["rejected", "reject", "denied"]):

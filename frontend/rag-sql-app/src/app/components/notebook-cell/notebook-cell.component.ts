@@ -332,7 +332,7 @@ export class NotebookCellComponent implements OnChanges, OnInit {
   columnDefs: ColDef[] = [];
   defaultColDef: ColDef = {
     sortable: true,
-    filter: true,
+    filter: false,
     resizable: true,
     minWidth: 80,
     maxWidth: 500,
@@ -344,11 +344,6 @@ export class NotebookCellComponent implements OnChanges, OnInit {
     theme: themeQuartz,
     enableCellTextSelection: true,
     ensureDomOrder: true,
-    rowSelection: {
-      mode: 'multiRow',
-      enableClickSelection: false,
-      enableSelectionWithoutKeys: true
-    },
     animateRows: true,
     pagination: true,
     paginationPageSize: 25,
@@ -386,16 +381,24 @@ export class NotebookCellComponent implements OnChanges, OnInit {
       // Set up AG-Grid column definitions
       if (this.cell.result_data.columns) {
         this.columnDefs = this.cell.result_data.columns.map((col: string) => {
+          // Check if this column contains dates
+          const isDateColumn = this.isDateColumn(col, this.cell.result_data.data);
+          
           // Calculate appropriate width based on column name and sample data
           const headerLength = col.length * 8; // Approximate pixel width per character
           let maxDataLength = 100; // Default minimum
           
-          // Sample first 10 rows to estimate content width
-          if (this.cell.result_data.data && this.cell.result_data.data.length > 0) {
-            const sampleSize = Math.min(10, this.cell.result_data.data.length);
-            for (let i = 0; i < sampleSize; i++) {
-              const value = String(this.cell.result_data.data[i][col] || '');
-              maxDataLength = Math.max(maxDataLength, value.length * 7);
+          // For date columns, use a standard width
+          if (isDateColumn) {
+            maxDataLength = 150; // Standard width for date columns
+          } else {
+            // Sample first 10 rows to estimate content width
+            if (this.cell.result_data.data && this.cell.result_data.data.length > 0) {
+              const sampleSize = Math.min(10, this.cell.result_data.data.length);
+              for (let i = 0; i < sampleSize; i++) {
+                const value = String(this.cell.result_data.data[i][col] || '');
+                maxDataLength = Math.max(maxDataLength, value.length * 7);
+              }
             }
           }
           
@@ -405,8 +408,6 @@ export class NotebookCellComponent implements OnChanges, OnInit {
           return {
             field: col,
             headerName: col,
-            filter: 'agTextColumnFilter',
-            floatingFilter: true,
             width: suggestedWidth,
             minWidth: 80,
             maxWidth: 400,
@@ -537,14 +538,122 @@ export class NotebookCellComponent implements OnChanges, OnInit {
     return `${start}-${end}`;
   }
   
-  formatCellValue(value: any): string {
+  formatCellValue(value: any, columnName?: string): string {
     if (value === null || value === undefined) {
       return 'NULL';
     }
+    
+    // Check if it's a boolean/bit field (0 or 1)
+    if ((value === 0 || value === 1 || value === true || value === false) && 
+        columnName && this.isBooleanColumn(columnName)) {
+      return value === 1 || value === true ? 'true' : 'false';
+    }
+    
+    // Check if it's a date string
+    if (typeof value === 'string' && this.isDateString(value)) {
+      return this.formatDate(value);
+    }
+    
     if (typeof value === 'object') {
       return JSON.stringify(value);
     }
     return String(value);
+  }
+  
+  isDateString(value: string): boolean {
+    // Check for common date formats
+    // ISO format: 2024-01-15T10:30:00
+    // SQL Date: 2024-01-15
+    // SQL DateTime: 2024-01-15 10:30:00
+    const datePatterns = [
+      /^\d{4}-\d{2}-\d{2}$/,  // YYYY-MM-DD
+      /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}/,  // YYYY-MM-DD HH:MM:SS or ISO
+      /^\d{2}\/\d{2}\/\d{4}$/,  // MM/DD/YYYY
+    ];
+    
+    if (datePatterns.some(pattern => pattern.test(value))) {
+      const date = new Date(value);
+      return !isNaN(date.getTime());
+    }
+    return false;
+  }
+  
+  formatDate(dateString: string): string {
+    const date = new Date(dateString);
+    
+    // Check if it has time component
+    const hasTime = dateString.includes('T') || dateString.includes(':');
+    
+    if (hasTime) {
+      // Format as: Jan 15, 2024 10:30 AM
+      return date.toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true
+      });
+    } else {
+      // Format as: Jan 15, 2024
+      return date.toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric'
+      });
+    }
+  }
+  
+  isDateColumn(columnName: string, data: any[]): boolean {
+    // Check if column name suggests it's a date
+    const dateColumnNames = ['date', 'created', 'updated', 'modified', 'timestamp', 'time', 'dob', 'birth', 'expire', 'start', 'end'];
+    const colLower = columnName.toLowerCase();
+    
+    if (dateColumnNames.some(name => colLower.includes(name))) {
+      return true;
+    }
+    
+    // Check actual data to see if values are dates
+    if (data && data.length > 0) {
+      // Sample first few non-null values
+      let sampledCount = 0;
+      let dateCount = 0;
+      
+      for (let i = 0; i < Math.min(5, data.length); i++) {
+        const value = data[i][columnName];
+        if (value !== null && value !== undefined) {
+          sampledCount++;
+          if (typeof value === 'string' && this.isDateString(value)) {
+            dateCount++;
+          }
+        }
+      }
+      
+      // If most sampled values are dates, consider it a date column
+      return sampledCount > 0 && dateCount / sampledCount >= 0.5;
+    }
+    
+    return false;
+  }
+  
+  isBooleanColumn(columnName: string): boolean {
+    // Check if column name suggests it's a boolean/bit field
+    const colLower = columnName.toLowerCase();
+    
+    // Common boolean column patterns
+    const booleanPatterns = [
+      /^is[A-Z_]/i,           // IsActive, IsDeleted, Is_Valid
+      /^has[A-Z_]/i,          // HasAccess, HasPermission
+      /^can[A-Z_]/i,          // CanEdit, CanDelete
+      /^should[A-Z_]/i,       // ShouldNotify
+      /^allow[A-Z_]/i,        // AllowLogin
+      /^enable[A-Z_]/i,       // EnableNotifications
+      /_flag$/i,              // active_flag, deleted_flag
+      /^flag_/i,              // flag_active
+      /active|enabled|deleted|approved|completed|verified|locked|published|visible|hidden/i
+    ];
+    
+    return booleanPatterns.some(pattern => pattern.test(colLower));
   }
   
   formatCellValueWithLookup(row: any, col: string): string {
@@ -564,7 +673,7 @@ export class NotebookCellComponent implements OnChanges, OnInit {
     // Add more lookup logic for other ID fields as needed
     // e.g., userid -> username, productid -> product_name, etc.
     
-    return this.formatCellValue(value);
+    return this.formatCellValue(value, col);
   }
   
   exportToCSV() {
