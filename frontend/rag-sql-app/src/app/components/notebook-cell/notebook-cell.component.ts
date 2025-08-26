@@ -1,4 +1,4 @@
-import { Component, Input, Output, EventEmitter, ViewChild, ElementRef, OnChanges, OnInit } from '@angular/core';
+import { Component, Input, Output, EventEmitter, ViewChild, ElementRef, OnChanges, OnInit, ViewEncapsulation } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ToastrService } from 'ngx-toastr';
@@ -16,6 +16,147 @@ ModuleRegistry.registerModules([AllCommunityModule]);
   selector: 'app-notebook-cell',
   standalone: true,
   imports: [CommonModule, FormsModule, QueryAutocompleteComponent, AgGridAngular],
+  encapsulation: ViewEncapsulation.None,
+  styles: [`
+    /* Modern AG-Grid UI Enhancement */
+    .notebook-cell-grid.ag-theme-quartz {
+      /* Modern color palette */
+      --ag-header-background-color: #6366f1;
+      --ag-header-foreground-color: #ffffff;
+      --ag-header-text-color: #ffffff;
+      --ag-odd-row-background-color: #ffffff;
+      --ag-row-hover-color: #f0f9ff;
+      --ag-selected-row-background-color: #e0e7ff;
+      --ag-border-color: #e2e8f0;
+      --ag-font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    }
+    
+    /* Beautiful gradient header with subtle animation */
+    .notebook-cell-grid .ag-header {
+      background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #a855f7 100%) !important;
+      border-bottom: 2px solid #5b21b6 !important;
+      box-shadow: 0 2px 4px rgba(99, 102, 241, 0.2) !important;
+    }
+    
+    /* Enhanced header cells */
+    .notebook-cell-grid .ag-header-cell {
+      border-right: 1px solid rgba(255, 255, 255, 0.15) !important;
+      transition: background-color 0.2s ease !important;
+    }
+    
+    .notebook-cell-grid .ag-header-cell:hover {
+      background-color: rgba(255, 255, 255, 0.1) !important;
+    }
+    
+    /* Header text styling */
+    .notebook-cell-grid .ag-header-cell,
+    .notebook-cell-grid .ag-header-cell-label,
+    .notebook-cell-grid .ag-header-cell-text {
+      color: #ffffff !important;
+      font-weight: 600 !important;
+      font-size: 0.875rem !important;
+      letter-spacing: 0.025em !important;
+      text-transform: uppercase !important;
+    }
+    
+    /* Sort indicators */
+    .notebook-cell-grid .ag-header-cell-sorted-asc .ag-sort-ascending-icon,
+    .notebook-cell-grid .ag-header-cell-sorted-desc .ag-sort-descending-icon {
+      color: #fbbf24 !important;
+    }
+    
+    /* Row styling with subtle backgrounds */
+    .notebook-cell-grid .ag-row {
+      transition: background-color 0.15s ease, box-shadow 0.15s ease !important;
+      border-bottom: 1px solid #f1f5f9 !important;
+    }
+    
+    .notebook-cell-grid .ag-row-even {
+      background-color: #fafbfc !important;
+    }
+    
+    .notebook-cell-grid .ag-row-odd {
+      background-color: #ffffff !important;
+    }
+    
+    /* Enhanced hover effect - smooth without movement */
+    .notebook-cell-grid .ag-row:hover {
+      background: linear-gradient(90deg, #f0f9ff 0%, #e0f2fe 100%) !important;
+      box-shadow: inset 3px 0 0 #6366f1, 0 1px 3px rgba(99, 102, 241, 0.08) !important;
+    }
+    
+    /* Selected row */
+    .notebook-cell-grid .ag-row-selected {
+      background: linear-gradient(90deg, #e0e7ff 0%, #c7d2fe 100%) !important;
+      font-weight: 500 !important;
+    }
+    
+    /* Cell styling */
+    .notebook-cell-grid .ag-cell {
+      padding: 0 16px !important;
+      font-size: 0.875rem !important;
+      color: #1e293b !important;
+      border-right: 1px solid #f1f5f9 !important;
+    }
+    
+    /* Special cell types */
+    .notebook-cell-grid .ag-cell[col-id*="id"],
+    .notebook-cell-grid .ag-cell[col-id*="Id"] {
+      font-family: 'Monaco', 'Courier New', monospace !important;
+      color: #6366f1 !important;
+      font-size: 0.813rem !important;
+    }
+    
+    .notebook-cell-grid .ag-cell[col-id*="date"],
+    .notebook-cell-grid .ag-cell[col-id*="Date"] {
+      color: #7c3aed !important;
+      font-weight: 500 !important;
+    }
+    
+    .notebook-cell-grid .ag-cell[col-id*="email"],
+    .notebook-cell-grid .ag-cell[col-id*="Email"] {
+      color: #0891b2 !important;
+    }
+    
+    /* Grid wrapper with modern card design */
+    .notebook-cell-grid .ag-root-wrapper {
+      border: 1px solid #e2e8f0;
+      border-radius: 0.75rem;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+      overflow: hidden;
+    }
+    
+    /* Pagination styling */
+    .notebook-cell-grid .ag-paging-panel {
+      background: linear-gradient(to right, #f8fafc, #f1f5f9) !important;
+      border-top: 2px solid #e2e8f0 !important;
+      padding: 12px 16px !important;
+    }
+    
+    /* Scrollbar styling */
+    .notebook-cell-grid .ag-body-viewport::-webkit-scrollbar,
+    .notebook-cell-grid .ag-body-horizontal-scroll::-webkit-scrollbar {
+      height: 8px;
+      width: 8px;
+    }
+    
+    .notebook-cell-grid .ag-body-viewport::-webkit-scrollbar-track,
+    .notebook-cell-grid .ag-body-horizontal-scroll::-webkit-scrollbar-track {
+      background: #f1f5f9;
+      border-radius: 4px;
+    }
+    
+    .notebook-cell-grid .ag-body-viewport::-webkit-scrollbar-thumb,
+    .notebook-cell-grid .ag-body-horizontal-scroll::-webkit-scrollbar-thumb {
+      background: #cbd5e1;
+      border-radius: 4px;
+    }
+    
+    .notebook-cell-grid .ag-body-viewport::-webkit-scrollbar-thumb:hover,
+    .notebook-cell-grid .ag-body-horizontal-scroll::-webkit-scrollbar-thumb:hover {
+      background: #6366f1;
+    }
+  `],
   template: `
     <div class="mb-2 bg-white rounded shadow-sm border border-gray-200">
       <!-- Prompt Cell -->
@@ -291,7 +432,7 @@ ModuleRegistry.registerModules([AllCommunityModule]);
               <!-- AG-Grid Table -->
               <ag-grid-angular
                 style="width: 100%; height: 500px; overflow-x: auto;"
-                class="ag-theme-quartz"
+                class="ag-theme-quartz notebook-cell-grid"
                 [rowData]="cell.result_data.data"
                 [columnDefs]="columnDefs"
                 [defaultColDef]="defaultColDef"
@@ -309,8 +450,7 @@ ModuleRegistry.registerModules([AllCommunityModule]);
         </div>
       </div>
     </div>
-  `,
-  styles: []
+  `
 })
 export class NotebookCellComponent implements OnChanges, OnInit {
   @Input() cell!: Cell;
@@ -384,8 +524,11 @@ export class NotebookCellComponent implements OnChanges, OnInit {
           // Check if this column contains dates
           const isDateColumn = this.isDateColumn(col, this.cell.result_data.data);
           
-          // Calculate appropriate width based on column name and sample data
-          const headerLength = col.length * 8; // Approximate pixel width per character
+          // Convert field name to readable header
+          const headerName = this.formatHeaderName(col);
+          
+          // Calculate appropriate width based on header name and sample data
+          const headerLength = headerName.length * 8; // Approximate pixel width per character
           let maxDataLength = 100; // Default minimum
           
           // For date columns, use a standard width
@@ -407,7 +550,7 @@ export class NotebookCellComponent implements OnChanges, OnInit {
           
           return {
             field: col,
-            headerName: col,
+            headerName: headerName,
             width: suggestedWidth,
             minWidth: 80,
             maxWidth: 400,
@@ -421,6 +564,11 @@ export class NotebookCellComponent implements OnChanges, OnInit {
         if (this.gridApi) {
           this.gridApi.setGridOption('columnDefs', this.columnDefs);
           this.gridApi.setGridOption('rowData', this.cell.result_data.data);
+          
+          // Apply styles after data update
+          setTimeout(() => {
+            this.applyGridStyles();
+          }, 100);
         }
       }
     }
@@ -551,7 +699,7 @@ export class NotebookCellComponent implements OnChanges, OnInit {
     
     // Check if it's a date string
     if (typeof value === 'string' && this.isDateString(value)) {
-      return this.formatDate(value);
+      return this.formatDate(value, columnName);
     }
     
     if (typeof value === 'object') {
@@ -578,13 +726,31 @@ export class NotebookCellComponent implements OnChanges, OnInit {
     return false;
   }
   
-  formatDate(dateString: string): string {
+  formatDate(dateString: string, columnName?: string): string {
     const date = new Date(dateString);
     
-    // Check if it has time component
-    const hasTime = dateString.includes('T') || dateString.includes(':');
+    // Check if this is a date-only field based on column name
+    const dateOnlyColumns = ['dob', 'birth', 'birthday', 'hire', 'start', 'end', 'expire', 'due'];
+    const isDateOnlyColumn = columnName && dateOnlyColumns.some(term => 
+      columnName.toLowerCase().includes(term)
+    );
     
-    if (hasTime) {
+    // Check if it has a meaningful time component (not midnight)
+    const hasTime = dateString.includes('T') || dateString.includes(':');
+    const hours = date.getHours();
+    const minutes = date.getMinutes();
+    const seconds = date.getSeconds();
+    const isMidnight = hours === 0 && minutes === 0 && seconds === 0;
+    
+    // Show date only if: it's a date-only column, or has no time, or time is midnight
+    if (isDateOnlyColumn || !hasTime || isMidnight) {
+      // Format as: Jan 15, 2024
+      return date.toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric'
+      });
+    } else {
       // Format as: Jan 15, 2024 10:30 AM
       return date.toLocaleDateString('en-US', {
         month: 'short',
@@ -594,14 +760,26 @@ export class NotebookCellComponent implements OnChanges, OnInit {
         minute: '2-digit',
         hour12: true
       });
-    } else {
-      // Format as: Jan 15, 2024
-      return date.toLocaleDateString('en-US', {
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric'
-      });
     }
+  }
+  
+  formatHeaderName(fieldName: string): string {
+    // Handle common SQL naming patterns and convert to readable format
+    
+    // Handle snake_case (e.g., first_name -> First Name)
+    if (fieldName.includes('_')) {
+      return fieldName
+        .split('_')
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+        .join(' ');
+    }
+    
+    // Handle PascalCase and camelCase (e.g., FirstName -> First Name, firstName -> First Name)
+    const result = fieldName.replace(/([a-z])([A-Z])/g, '$1 $2')
+                           .replace(/([A-Z])([A-Z][a-z])/g, '$1 $2');
+    
+    // Capitalize first letter
+    return result.charAt(0).toUpperCase() + result.slice(1);
   }
   
   isDateColumn(columnName: string, data: any[]): boolean {
@@ -718,18 +896,43 @@ export class NotebookCellComponent implements OnChanges, OnInit {
   onGridReady(params: GridReadyEvent) {
     this.gridApi = params.api;
     
+    // Apply custom styles after grid is ready
+    this.applyGridStyles();
+    
     // Auto-size columns based on content, not container width
     setTimeout(() => {
       // Don't use sizeColumnsToFit() as it expands columns to fill width
       // Instead, let the column widths be determined by content
       // The autoSizeStrategy in gridOptions will handle this
       this.gridApi.autoSizeAllColumns(false);
+      
+      // Re-apply styles after sizing
+      this.applyGridStyles();
     }, 100);
     
     // Set initial page size from preferences
     if (this.pageSize) {
       this.gridApi.setGridOption('paginationPageSize', this.pageSize);
     }
+  }
+  
+  private applyGridStyles() {
+    // Force apply styles to AG-Grid elements after grid creation
+    setTimeout(() => {
+      const gridElement = document.querySelector('.notebook-cell-grid');
+      if (gridElement) {
+        // Force repaint to ensure styles are applied
+        (gridElement as HTMLElement).style.display = 'none';
+        (gridElement as HTMLElement).offsetHeight; // Trigger reflow
+        (gridElement as HTMLElement).style.display = '';
+        
+        // Also ensure the CSS variables are applied
+        const gridWrapper = gridElement.querySelector('.ag-root-wrapper');
+        if (gridWrapper) {
+          (gridWrapper as HTMLElement).style.setProperty('--ag-header-background-color', '#667eea');
+        }
+      }
+    }, 0);
   }
   
   // Retry information helper methods
