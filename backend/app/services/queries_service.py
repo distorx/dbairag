@@ -2,10 +2,28 @@
 Queries service for handling comprehensive context and query execution
 """
 import logging
+import time
 from typing import Dict, Any, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
+
+# Cache for comprehensive contexts - stores the last context for each connection
+# This avoids regenerating the context for every query
+_context_cache: Dict[str, Dict[str, Any]] = {}
+_context_cache_timestamps: Dict[str, float] = {}
+CONTEXT_CACHE_TTL = 300  # 5 minutes
+
+def clear_context_cache(connection_id: Optional[str] = None):
+    """Clear the comprehensive context cache for a specific connection or all connections"""
+    if connection_id:
+        _context_cache.pop(connection_id, None)
+        _context_cache_timestamps.pop(connection_id, None)
+        logger.info(f"Cleared context cache for connection {connection_id}")
+    else:
+        _context_cache.clear()
+        _context_cache_timestamps.clear()
+        logger.info("Cleared all context caches")
 
 async def get_comprehensive_context(
     schema_analyzer,
@@ -32,10 +50,35 @@ async def get_comprehensive_context(
         Dict containing comprehensive database context
     """
     try:
-        logger.info(f"Getting comprehensive context for connection {connection_id}")
+        # Check if we have a cached context that's still valid
+        if not force_refresh and connection_id in _context_cache:
+            cache_age = time.time() - _context_cache_timestamps.get(connection_id, 0)
+            if cache_age < CONTEXT_CACHE_TTL:
+                logger.info(f"Using cached comprehensive context for connection {connection_id} (age: {cache_age:.1f}s)")
+                return _context_cache[connection_id]
+            else:
+                logger.info(f"Cached context for connection {connection_id} expired (age: {cache_age:.1f}s)")
         
-        # Get database schema information
-        engine = schema_analyzer.create_engine(connection.connection_string)
+        logger.info(f"Building comprehensive context for connection {connection_id}, force_refresh={force_refresh}")
+        
+        # Reuse existing engine from schema analyzer's cache if possible
+        # This avoids creating a new engine every time which is expensive
+        if hasattr(schema_analyzer, '_engine_cache'):
+            if connection_id in schema_analyzer._engine_cache:
+                engine = schema_analyzer._engine_cache[connection_id]
+                logger.info(f"Using cached engine for connection {connection_id}")
+            else:
+                engine = schema_analyzer.create_engine(connection.connection_string)
+                schema_analyzer._engine_cache[connection_id] = engine
+                logger.info(f"Created and cached new engine for connection {connection_id}")
+        else:
+            # Initialize engine cache if it doesn't exist
+            schema_analyzer._engine_cache = {}
+            engine = schema_analyzer.create_engine(connection.connection_string)
+            schema_analyzer._engine_cache[connection_id] = engine
+            logger.info(f"Initialized engine cache and created engine for connection {connection_id}")
+        
+        # Get database schema information (this will use Redis cache if available)
         schema_info = await schema_analyzer.get_database_schema(
             engine, 
             connection_id,
@@ -64,7 +107,11 @@ async def get_comprehensive_context(
             "force_refreshed": force_refresh
         }
         
-        logger.info(f"Comprehensive context prepared for connection {connection_id}")
+        # Cache the comprehensive context
+        _context_cache[connection_id] = comprehensive_context
+        _context_cache_timestamps[connection_id] = time.time()
+        
+        logger.info(f"Comprehensive context prepared and cached for connection {connection_id}")
         return comprehensive_context
         
     except Exception as e:

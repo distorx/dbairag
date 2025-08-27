@@ -107,6 +107,72 @@ class RAGService:
         enums = comprehensive_context.get("enums")
         documentation = comprehensive_context.get("documentation")
         
+        # CHECK SIMPLE PATTERNS FIRST before using expensive LLM
+        # This significantly speeds up common queries like "show [table]"
+        if schema_info and "tables" in schema_info:
+            # Pattern check for simple table queries (with optional limit)
+            simple_table_patterns = [
+                (r'^show\s+(\d+)\s+(\w+)$', True),     # "show 10 cities"
+                (r'^show\s+(\w+)$', False),            # "show cities"
+                (r'^list\s+(\d+)\s+(\w+)$', True),     # "list 10 cities"
+                (r'^list\s+(\w+)$', False),            # "list cities"
+                (r'^select\s+from\s+(\w+)$', False),
+                (r'^select\s+\*\s+from\s+(\w+)$', False),
+                (r'^display\s+(\d+)\s+(\w+)$', True),  # "display 10 cities"
+                (r'^display\s+(\w+)$', False),
+                (r'^view\s+(\d+)\s+(\w+)$', True),     # "view 10 cities"
+                (r'^view\s+(\w+)$', False)
+            ]
+            
+            for pattern_tuple in simple_table_patterns:
+                pattern_str, has_limit = pattern_tuple
+                match = re.match(pattern_str, prompt_lower)
+                if match:
+                    # Extract limit and table name
+                    if has_limit:
+                        limit = int(match.group(1))
+                        requested_table = match.group(2)
+                    else:
+                        limit = 100  # Default limit
+                        requested_table = match.group(1)
+                    
+                    logger.info(f"🔍 Checking for simple table query in FULL CONTEXT: '{requested_table}' with limit {limit}")
+                    
+                    # Check if the requested table exists in schema (case-insensitive)
+                    table_names = list(schema_info["tables"].keys())
+                    for table_name in table_names:
+                        # Check for exact match, plural forms, and singular forms
+                        if table_name.lower() == requested_table.lower() or \
+                           table_name.lower() == requested_table.lower() + 's' or \
+                           table_name.lower() == requested_table.lower() + 'es' or \
+                           table_name.lower() == requested_table.lower().rstrip('s') or \
+                           table_name.lower() == requested_table.lower().rstrip('es'):
+                            # Found a matching table!
+                            logger.info(f"✅ Found table '{table_name}' - AVOIDING expensive LLM call! Using limit: {limit}")
+                            sql_query = f"SELECT TOP {limit} * FROM {table_name} WITH (NOLOCK)"
+                            result_type = "table"
+                            
+                            # Apply fuzzy correction
+                            sql_query, metadata = self._apply_fuzzy_correction(
+                                sql_query, 
+                                {"result_type": result_type, "pattern_matched": True, "fast_path": True}
+                            )
+                            
+                            # Cache the result
+                            if sql_query and self.redis_service and self.redis_service.is_connected and connection_id:
+                                await self.redis_service.cache_sql_generation(
+                                    prompt, connection_id, sql_query, 
+                                    ttl=settings.cache_ttl_sql
+                                )
+                            
+                            # Add timing info
+                            elapsed_time = (time.time() - start_time) * 1000
+                            metadata["execution_time_ms"] = elapsed_time
+                            logger.info(f"⚡ Fast pattern match completed in {elapsed_time:.0f}ms")
+                            
+                            return sql_query, metadata
+                    break  # Only check one pattern if match found
+        
         # Teach fuzzy corrector from schema if available
         if schema_info and "tables" in schema_info:
             self.fuzzy_corrector.learn_from_schema(schema_info)
@@ -118,10 +184,10 @@ class RAGService:
                 logger.info(f"SQL loaded from Redis cache for prompt: {prompt[:50]}...")
                 return cached_sql, {"cached": True}
         
-        # TEMPORARY: Disable OpenAI for debugging performance issues
-        if True:  # not self.llm:
-            logger.info(f"🔄 Using fallback pattern matching (bypassing OpenAI)")
-            print("DEBUG_FULL_CONTEXT: Using fallback pattern matching (bypassing OpenAI)")
+        # Use OpenAI if available, otherwise use pattern matching
+        if not self.llm:
+            logger.info(f"🔄 Using fallback pattern matching (OpenAI not available)")
+            print("DEBUG_FULL_CONTEXT: Using fallback pattern matching (OpenAI not available)")
             # Fallback to enhanced pattern matching with full context
             print(f"DEBUG_FULL_CONTEXT: About to call _comprehensive_sql_generation")
             sql, metadata = await self._comprehensive_sql_generation(prompt, comprehensive_context, connection_id)
@@ -376,11 +442,10 @@ class RAGService:
                 logger.info(f"SQL loaded from Redis cache for prompt: {prompt[:50]}...")
                 return cached_sql, {"cached": True}
         
-        # TEMPORARY: Disable OpenAI for debugging performance issues  
-        # Use faster pattern matching that has proper JOIN logic
-        if True:  # not self.llm:
+        # Use OpenAI if available, otherwise use pattern matching
+        if not self.llm:
             # Fallback to pattern matching with schema awareness
-            logger.info("💡 Using fallback pattern matching (bypassing OpenAI)")
+            logger.info("💡 Using fallback pattern matching (OpenAI not available)")
             sql, metadata = await self._schema_aware_sql_generation(prompt, schema_info, connection_id)
             
             # Cache the result if successful
@@ -900,6 +965,52 @@ class RAGService:
         # If we have schema info, try to find relevant tables
         if schema_info and "tables" in schema_info and schema_info["tables"]:
             relevant_tables = self.schema_analyzer.find_relevant_tables(prompt, schema_info)
+            
+            # QUICK CHECK: Handle generic "show/list/select [table_name]" patterns before other patterns
+            # This avoids falling back to expensive LLM calls
+            simple_table_patterns = [
+                (r'^show\s+(\d+)\s+(\w+)$', True),     # "show 10 cities"
+                (r'^show\s+(\w+)$', False),            # "show cities"
+                (r'^list\s+(\d+)\s+(\w+)$', True),     # "list 10 cities"
+                (r'^list\s+(\w+)$', False),            # "list cities"
+                (r'^select\s+from\s+(\w+)$', False),
+                (r'^select\s+\*\s+from\s+(\w+)$', False),
+                (r'^display\s+(\d+)\s+(\w+)$', True),  # "display 10 cities"
+                (r'^display\s+(\w+)$', False),
+                (r'^view\s+(\d+)\s+(\w+)$', True),     # "view 10 cities"
+                (r'^view\s+(\w+)$', False)
+            ]
+            
+            for pattern_tuple in simple_table_patterns:
+                pattern_str, has_limit = pattern_tuple
+                match = re.match(pattern_str, prompt_lower.strip())
+                if match:
+                    # Extract limit and table name
+                    if has_limit:
+                        limit = int(match.group(1))
+                        requested_table = match.group(2)
+                    else:
+                        limit = 100  # Default limit
+                        requested_table = match.group(1)
+                    
+                    logger.info(f"🔍 Checking for simple table query: '{requested_table}' with limit {limit}")
+                    
+                    # Check if the requested table exists in schema (case-insensitive)
+                    table_names = list(schema_info["tables"].keys())
+                    for table_name in table_names:
+                        # Check for exact match, plural forms, and singular forms
+                        if table_name.lower() == requested_table.lower() or \
+                           table_name.lower() == requested_table.lower() + 's' or \
+                           table_name.lower() == requested_table.lower() + 'es' or \
+                           table_name.lower() == requested_table.lower().rstrip('s') or \
+                           table_name.lower() == requested_table.lower().rstrip('es'):
+                            # Found a matching table!
+                            logger.info(f"✅ Found table '{table_name}' for simple query - avoiding LLM call with limit {limit}")
+                            sql_query = f"SELECT TOP {limit} * FROM {table_name} WITH (NOLOCK)"
+                            result_type = "table"
+                            sql_query, metadata = self._apply_fuzzy_correction(sql_query, {"result_type": result_type, "pattern_matched": True})
+                            return sql_query, metadata
+                    break  # Only check one pattern if match found
             
             # Enhanced patterns with MSSQL-specific syntax and schema awareness
             patterns = {

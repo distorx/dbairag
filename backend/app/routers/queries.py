@@ -6,6 +6,7 @@ import json
 import time
 import os
 import uuid
+import re
 from pathlib import Path
 import aiofiles
 import asyncio
@@ -353,6 +354,140 @@ async def execute_query(
         )
     
     start_time = time.time()
+    
+    # FAST PATH: Check for simple "show/list/view [table]" queries
+    # This avoids building comprehensive context for simple queries
+    prompt_lower = request.prompt.lower().strip()
+    simple_patterns = [
+        (r'^count\s+(\w+)$', False, 'count'),      # "count cities" - COUNT query
+        (r'^show\s+(\d+)\s+(\w+)$', True, 'select'),  # "show 10 cities" - with limit
+        (r'^show\s+(\w+)$', False, 'select'),         # "show cities" - no limit
+        (r'^list\s+(\d+)\s+(\w+)$', True, 'select'),  # "list 10 cities" - with limit
+        (r'^list\s+(\w+)$', False, 'select'),         # "list cities" - no limit
+        (r'^select\s+from\s+(\w+)$', False, 'select'),
+        (r'^select\s+\*\s+from\s+(\w+)$', False, 'select'),
+        (r'^display\s+(\d+)\s+(\w+)$', True, 'select'),  # "display 10 cities" - with limit
+        (r'^display\s+(\w+)$', False, 'select'),
+        (r'^view\s+(\d+)\s+(\w+)$', True, 'select'),     # "view 10 cities" - with limit
+        (r'^view\s+(\w+)$', False, 'select'),
+        (r'^how\s+many\s+(\w+)$', False, 'count'),  # "how many cities" - COUNT query
+        (r'^total\s+(\w+)$', False, 'count'),       # "total cities" - COUNT query
+    ]
+    
+    for pattern_tuple in simple_patterns:
+        pattern_str, has_limit, query_type = pattern_tuple
+        match = re.match(pattern_str, prompt_lower)
+        if match:
+            # This is a simple table query - use fast path!
+            logger.info(f"⚡ FAST PATH: Simple table query detected: '{request.prompt}'")
+            
+            # Extract limit and table name based on pattern
+            if has_limit:
+                limit = int(match.group(1))
+                requested_table = match.group(2)
+            else:
+                limit = 100  # Default limit for SELECT queries
+                requested_table = match.group(1)
+            
+            logger.info(f"⚡ FAST PATH: Table: '{requested_table}', Limit: {limit}")
+            
+            # Try to get cached schema first (super fast)
+            schema_info = None
+            cache_key = str(connection.id)
+            
+            # Check for cached schema in different ways
+            if hasattr(schema_analyzer, '_schema_cache'):
+                if cache_key in schema_analyzer._schema_cache:
+                    schema_info = schema_analyzer._schema_cache[cache_key]
+                    logger.info(f"⚡ FAST PATH: Using in-memory cached schema for key '{cache_key}'")
+                else:
+                    logger.info(f"⚡ FAST PATH: No cached schema for key '{cache_key}', cache keys: {list(schema_analyzer._schema_cache.keys()) if hasattr(schema_analyzer, '_schema_cache') else 'none'}")
+            else:
+                # Fall back to loading schema (slower but necessary first time)
+                engine = schema_analyzer.create_engine(connection.connection_string)
+                schema_info = await schema_analyzer.get_database_schema(
+                    engine, str(connection.id), force_refresh=False
+                )
+                logger.info(f"⚡ FAST PATH: Had to load schema (first time)")
+            
+            if schema_info and "tables" in schema_info:
+                table_names = list(schema_info["tables"].keys())
+                
+                # Find matching table
+                for table_name in table_names:
+                    if table_name.lower() == requested_table.lower() or \
+                       table_name.lower() == requested_table.lower() + 's' or \
+                       table_name.lower() == requested_table.lower() + 'es' or \
+                       table_name.lower() == requested_table.lower().rstrip('s') or \
+                       table_name.lower() == requested_table.lower().rstrip('es'):
+                        
+                        # Found the table! Generate SQL directly based on query type
+                        if query_type == 'count':
+                            sql_query = f"SELECT COUNT(*) AS total FROM {table_name} WITH (NOLOCK)"
+                            result_type = ResultType.TEXT
+                            logger.info(f"⚡ FAST PATH: Generated COUNT SQL in {(time.time()-start_time)*1000:.0f}ms")
+                        else:  # select query
+                            sql_query = f"SELECT TOP {limit} * FROM {table_name} WITH (NOLOCK)"
+                            result_type = ResultType.TABLE
+                            logger.info(f"⚡ FAST PATH: Generated SELECT SQL with limit {limit} in {(time.time()-start_time)*1000:.0f}ms")
+                        
+                        # Execute the SQL directly
+                        try:
+                            df, error = await QueryExecutionService.execute_query_async(
+                                connection.connection_string,
+                                sql_query,
+                                connection.database_type
+                            )
+                            
+                            if error:
+                                raise Exception(f"SQL Execution Error: {error}")
+                            
+                            # Prepare result based on query type
+                            if df is not None:
+                                if query_type == 'count':
+                                    # For COUNT queries, extract the single value
+                                    result_data = str(df.iloc[0, 0]) if len(df) > 0 else "0"
+                                else:
+                                    # For SELECT queries, return full table data
+                                    result_data = {
+                                        "columns": df.columns.tolist(),
+                                        "data": df.to_dict('records'),
+                                        "row_count": len(df)
+                                    }
+                            else:
+                                result_data = "Query executed successfully"
+                            
+                            execution_time = int((time.time() - start_time) * 1000)
+                            
+                            # Save to history
+                            await db.execute(
+                                query_history_table.insert().values(
+                                    connection_id=connection.id,
+                                    prompt=request.prompt,
+                                    generated_sql=sql_query,
+                                    result_type=result_type,  # Use the determined result_type
+                                    result_data=safe_json_dumps(result_data),
+                                    execution_time=execution_time
+                                )
+                            )
+                            await db.commit()
+                            
+                            logger.info(f"⚡ FAST PATH: Completed in {execution_time}ms")
+                            
+                            return QueryResponse(
+                                prompt=request.prompt,
+                                generated_sql=sql_query,
+                                result_type=result_type,  # Use the determined result_type
+                                result_data=result_data,
+                                execution_time=execution_time,
+                                metadata={"fast_path": True, "pattern_matched": True, "query_type": query_type}
+                            )
+                            
+                        except Exception as e:
+                            logger.error(f"Fast path execution error: {e}")
+                            # Fall through to normal path if fast path fails
+                            break
+            break  # Only check one pattern
     
     try:
         # Store SQL query for table suggestions

@@ -1383,6 +1383,60 @@ class OptimizedRAGService:
         prompt_lower = prompt.lower().strip()
         logger.info(f"🔍 Pattern matching called for: '{prompt}' (connection: {connection_id})")
         
+        # Simple patterns for common queries - check these FIRST for fastest response
+        import re
+        simple_patterns = [
+            # Count patterns
+            (r'^count\s+(\w+)$', False, 'count'),           # "count cities"
+            (r'^how\s+many\s+(\w+)$', False, 'count'),      # "how many cities"
+            (r'^total\s+(\w+)$', False, 'count'),           # "total cities"
+            # Show/list patterns with limits
+            (r'^show\s+(\d+)\s+(\w+)$', True, 'select'),    # "show 10 cities"
+            (r'^list\s+(\d+)\s+(\w+)$', True, 'select'),    # "list 10 cities"
+            (r'^view\s+(\d+)\s+(\w+)$', True, 'select'),    # "view 10 cities"
+            (r'^display\s+(\d+)\s+(\w+)$', True, 'select'), # "display 10 cities"
+            # Show/list patterns without limits
+            (r'^show\s+(\w+)$', False, 'select'),           # "show cities"
+            (r'^list\s+(\w+)$', False, 'select'),           # "list cities"
+            (r'^view\s+(\w+)$', False, 'select'),           # "view cities"
+            (r'^display\s+(\w+)$', False, 'select'),        # "display cities"
+        ]
+        
+        # Check simple patterns first
+        for pattern, has_limit, query_type in simple_patterns:
+            match = re.match(pattern, prompt_lower)
+            if match:
+                if has_limit:
+                    limit = int(match.group(1))
+                    table_name_raw = match.group(2)
+                else:
+                    limit = 100  # Default limit
+                    table_name_raw = match.group(1)
+                
+                # Find matching table name (case-insensitive)
+                table_name = None
+                if schema_info and "tables" in schema_info:
+                    for actual_table_name in schema_info.get("tables", {}).keys():
+                        if actual_table_name.lower() == table_name_raw.lower():
+                            table_name = actual_table_name
+                            break
+                        # Also check for pluralization variations
+                        elif actual_table_name.lower() == table_name_raw.lower() + 's':
+                            table_name = actual_table_name
+                            break
+                        elif actual_table_name.lower() + 's' == table_name_raw.lower():
+                            table_name = actual_table_name
+                            break
+                
+                # If table found, generate SQL
+                if table_name:
+                    if query_type == 'count':
+                        logger.info(f"🎯 Simple pattern matched: count {table_name}")
+                        return f"SELECT COUNT(*) AS total FROM {table_name} WITH (NOLOCK)"
+                    else:  # select
+                        logger.info(f"🎯 Simple pattern matched: show {limit} {table_name}")
+                        return f"SELECT TOP {limit} * FROM {table_name} WITH (NOLOCK)"
+        
         # Analyze schema for smart query generation
         schema_analysis = self._analyze_schema_relationships(schema_info)
         
