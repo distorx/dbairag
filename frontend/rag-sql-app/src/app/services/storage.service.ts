@@ -48,6 +48,10 @@ export class StorageService {
     return stored ? parseInt(stored, 10) : null;
   }
 
+  clearSelectedConnection(): void {
+    localStorage.removeItem(this.STORAGE_KEYS.SELECTED_CONNECTION);
+  }
+
   // Connection List Cache
   saveConnectionList(connections: any[]): void {
     localStorage.setItem(this.STORAGE_KEYS.CONNECTION_LIST, JSON.stringify(connections));

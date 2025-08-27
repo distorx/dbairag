@@ -10,9 +10,9 @@ import { takeUntil } from 'rxjs/operators';
   standalone: true,
   imports: [CommonModule],
   template: `
-    <div class="bg-white rounded shadow border border-gray-100 overflow-hidden h-full">
+    <div class="bg-white rounded-xl shadow-lg border border-gray-100 overflow-hidden h-full">
       <!-- Header -->
-      <div class="bg-gradient-to-r from-blue-600 to-indigo-600 px-3 py-2">
+      <div class="bg-gradient-to-r from-purple-600 to-indigo-600 px-3 py-2">
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-2">
             <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -20,13 +20,9 @@ import { takeUntil } from 'rxjs/operators';
             </svg>
             <h3 class="text-sm font-semibold text-white">Cache Performance</h3>
           </div>
-          <div class="flex items-center gap-1">
-            <span *ngIf="stats?.connected" class="bg-green-500 w-2 h-2 rounded-full animate-pulse"></span>
-            <span *ngIf="!stats?.connected" class="bg-gray-500 w-2 h-2 rounded-full"></span>
-            <span class="text-xs text-white/90">
-              {{ stats?.connected ? 'Active' : 'Offline' }}
-            </span>
-          </div>
+          <span class="bg-white/20 text-white px-2 py-0.5 rounded-full text-xs">
+            {{ stats?.connected ? 'Active' : 'Offline' }}
+          </span>
         </div>
       </div>
       

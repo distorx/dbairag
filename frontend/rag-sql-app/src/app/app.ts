@@ -70,26 +70,26 @@ import { StorageService } from './services/storage.service';
       </header>
       
       <main class="flex-1 w-full px-8 py-6">
-        <!-- First Row - Connection and Tools with Golden Ratio -->
+        <!-- First Row - Connection and Tools -->
         <div class="mb-6">
-          <div class="grid grid-cols-1 lg:grid-cols-5 gap-6">
+          <div class="grid grid-cols-1 lg:grid-cols-6 gap-6">
             <!-- Connection Manager -->
-            <div class="lg:col-span-1">
+            <div class="lg:col-span-2">
               <app-connection-manager 
                 (connectionSelected)="onConnectionSelected($event)">
               </app-connection-manager>
             </div>
             
             <!-- Enum Manager -->
-            <div class="lg:col-span-1">
+            <div class="lg:col-span-2">
               <app-enum-manager 
                 *ngIf="currentConnectionId"
                 [connectionId]="currentConnectionId">
               </app-enum-manager>
             </div>
             
-            <!-- Cache Stats - Golden Ratio Width -->
-            <div class="lg:col-span-3">
+            <!-- Cache Stats - Compact Width -->
+            <div class="lg:col-span-2">
               <app-cache-stats [currentConnectionId]="currentConnectionId"></app-cache-stats>
             </div>
           </div>

@@ -1,0 +1,218 @@
+{
+    "generated_at": "2025-08-22T13:48:33.045198",
+    "description": "All enums used in BecasScholarshipSystem API",
+    "total_enums": 11,
+    "enums": {
+        "ApplicationStatus": {
+            "source_file": "BecasScholarshipSystem.Core/Entities/ScholarshipApplication.cs",
+            "values": {
+                "SinSolicitud": {
+                    "description": "No application created yet",
+                    "value": 0
+                },
+                "FaltaDocumentos": {
+                    "description": "Application created but missing documents (0/5 to 4/5)",
+                    "value": 1
+                },
+                "Evaluacion": {
+                    "description": "All documents uploaded (5/5)",
+                    "value": 2
+                },
+                "Aprobada": {
+                    "description": "Approved by all 3 board members",
+                    "value": 3
+                },
+                "Pagada": {
+                    "description": "Check created and payment processed",
+                    "value": 4
+                },
+                "Rechazada": {
+                    "description": "Application rejected",
+                    "value": 5
+                }
+            }
+        },
+        "ApplicationStatusDatabase": {
+            "source_file": "Database Convention",
+            "values": {
+                "Nuevo": {
+                    "value": 1,
+                    "description": "Nueva solicitud sin evaluar"
+                },
+                "Evaluacion": {
+                    "value": 2,
+                    "description": "En proceso de evaluaci\u00f3n (todos los documentos subidos)"
+                },
+                "Aprobada": {
+                    "value": 3,
+                    "description": "Aprobada por la junta"
+                },
+                "FaltaDocumentos": {
+                    "value": 4,
+                    "description": "Solicitud con documentos pendientes"
+                },
+                "Rechazada": {
+                    "value": 5,
+                    "description": "Solicitud rechazada"
+                }
+            }
+        },
+        "AwardStatus": {
+            "source_file": "BecasScholarshipSystem.Core/Entities/ScholarshipAward.cs",
+            "values": {
+                "Pending": {
+                    "value": 0
+                },
+                "Approved": {
+                    "value": 1
+                },
+                "Processing": {
+                    "value": 2
+                },
+                "Disbursed": {
+                    "value": 3
+                },
+                "Failed": {
+                    "value": 4
+                },
+                "Cancelled": {
+                    "value": 5
+                }
+            }
+        },
+        "DocumentStatus": {
+            "source_file": "StudentDocuments Table",
+            "values": {
+                "Uploaded": {
+                    "value": 0,
+                    "description": "Documento subido"
+                },
+                "Pending": {
+                    "value": 1,
+                    "description": "Pendiente de revisi\u00f3n"
+                },
+                "Approved": {
+                    "value": 2,
+                    "description": "Documento aprobado"
+                },
+                "Rejected": {
+                    "value": 3,
+                    "description": "Documento rechazado"
+                }
+            }
+        },
+        "IdentificationType": {
+            "source_file": "BecasScholarshipSystem.Core/Entities/Student.cs",
+            "values": {
+                "Licencia": {
+                    "value": 0
+                },
+                "Identificacion": {
+                    "value": 1
+                },
+                "Pasaporte": {
+                    "value": 2
+                }
+            }
+        },
+        "ReceiptStatus": {
+            "source_file": "BecasScholarshipSystem.Core/Entities/StudentReceipt.cs",
+            "values": {
+                "Pending": {
+                    "value": 0
+                },
+                "Approved": {
+                    "value": 1
+                },
+                "Rejected": {
+                    "value": 2
+                },
+                "UnderReview": {
+                    "value": 3
+                }
+            }
+        },
+        "ReviewDecision": {
+            "source_file": "BecasScholarshipSystem.Core/Entities/ApplicationReview.cs",
+            "values": {
+                "Pending": {
+                    "value": 0
+                },
+                "Approved": {
+                    "value": 1
+                },
+                "Rejected": {
+                    "value": 2
+                },
+                "NeedsMoreInfo": {
+                    "value": 3
+                }
+            }
+        },
+        "SelectionMethod": {
+            "source_file": "BecasScholarshipSystem.Core/Entities/SelectionResult.cs",
+            "values": {
+                "GPA": {
+                    "value": 0
+                },
+                "CollegeBoard": {
+                    "value": 1
+                },
+                "Lottery": {
+                    "value": 2
+                },
+                "Manual": {
+                    "value": 3
+                }
+            }
+        },
+        "UploadedByType": {
+            "source_file": "BecasScholarshipSystem.Core/Entities/StudentReceipt.cs",
+            "values": {
+                "Student": {
+                    "value": 0
+                },
+                "Staff": {
+                    "value": 1
+                },
+                "Admin": {
+                    "value": 2
+                }
+            }
+        },
+        "UserRole": {
+            "source_file": "BecasScholarshipSystem.Core/Entities/ApplicationUser.cs",
+            "values": {
+                "Student": {
+                    "value": 0
+                },
+                "CommitteeMember": {
+                    "value": 1
+                },
+                "Administrator": {
+                    "value": 2
+                },
+                "BoardMember": {
+                    "value": 3
+                }
+            }
+        },
+        "UserType": {
+            "source_file": "BecasScholarshipSystem.Core/Entities/ApplicationNote.cs",
+            "values": {
+                "Student": {
+                    "value": 0
+                },
+                "Staff": {
+                    "value": 1
+                },
+                "Admin": {
+                    "value": 2
+                },
+                "BoardMember": {
+                    "value": 3
+                }
+            }
+        }
+    }
+}

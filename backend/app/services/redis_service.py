@@ -238,6 +238,9 @@ class RedisService:
             enum_keys = 0
             sql_keys = 0
             result_keys = 0
+            docs_keys = 0
+            hints_keys = 0
+            patterns_keys = 0
             
             async for key in self.redis_client.scan_iter(match="dbairag:*"):
                 key_str = key.decode() if isinstance(key, bytes) else key
@@ -249,6 +252,12 @@ class RedisService:
                     sql_keys += 1
                 elif "query_result:" in key_str:
                     result_keys += 1
+                elif "docs:" in key_str or "documentation:" in key_str:
+                    docs_keys += 1
+                elif "hints:" in key_str:
+                    hints_keys += 1
+                elif "patterns:" in key_str:
+                    patterns_keys += 1
             
             return {
                 "connected": True,
@@ -264,9 +273,9 @@ class RedisService:
                 ),
                 "used_memory_human": memory.get("used_memory_human", "0B"),
                 "cached_keys": {
-                    "schemas": schema_keys,
-                    "enums": enum_keys,
-                    "sql_queries": sql_keys,
+                    "schemas": schema_keys + docs_keys,  # Combine docs with schemas
+                    "enums": enum_keys + hints_keys,     # Combine hints with enums
+                    "sql_queries": sql_keys + patterns_keys,  # Combine patterns with sql
                     "query_results": result_keys
                 }
             }
